@@ -32,7 +32,7 @@ def _decompress_if_needed(data: bytes) -> bytes:
     """Best-effort decompression of a possibly LZFu-compressed RTF stream."""
     try:
         decompressed = compressed_rtf.decompress(data)
-    except Exception:  # noqa: BLE001 - compressed_rtf raises bare Exception
+    except Exception:
         return data
     if isinstance(decompressed, str):
         decompressed = decompressed.encode("utf-8", errors="replace")
@@ -68,9 +68,7 @@ def rtf_to_content(rtf_data: bytes) -> tuple[str | None, str | None]:
     return None, None
 
 
-_CONTROL_WORD_RE = re.compile(
-    r"\\'[0-9a-fA-F]{2}|\\[a-zA-Z]+-?\d*[ ]?|\\[^a-zA-Z]|[{}]|\r|\n"
-)
+_CONTROL_WORD_RE = re.compile(r"\\'[0-9a-fA-F]{2}|\\[a-zA-Z]+-?\d*[ ]?|\\[^a-zA-Z]|[{}]|\r|\n")
 
 
 def strip_rtf_controls(rtf_data: bytes) -> str:

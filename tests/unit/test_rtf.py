@@ -84,7 +84,7 @@ def test_decompress_if_needed_handles_compressed_rtf_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def raising_decompress(_data: Any) -> bytes:
-        raise Exception("Unknown type of RTF compression!")  # noqa: TRY002
+        raise Exception("Unknown type of RTF compression!")
 
     monkeypatch.setattr(rtf.compressed_rtf, "decompress", raising_decompress)
     result = rtf._decompress_if_needed(HTML_ENCAPSULATED_RTF)
