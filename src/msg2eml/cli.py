@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from msg2eml.convert import ConversionResult, convert_file
@@ -73,6 +74,25 @@ def _log_result(result: ConversionResult) -> None:
             logger.debug("  warning: %s", warning)
 
 
+def _convert_one(
+    msg_file: Path, resolve_output: Callable[[], Path], *, force: bool
+) -> ConversionResult:
+    """Resolve an output path and convert one file, never raising.
+
+    Output-path resolution (e.g. ``resolve_batch_output_path``'s use of
+    ``Path.relative_to``) can itself raise -- for example a symlinked
+    ``.msg`` file pointing outside the folder being walked. That must
+    become a per-file failure like any other, not an uncaught exception
+    that aborts the rest of a batch run.
+    """
+    try:
+        output_path = resolve_output()
+    except Exception as exc:
+        logger.debug("Failed to resolve output path for %s", msg_file, exc_info=True)
+        return ConversionResult(msg_file, "failed", error=f"Could not resolve output path: {exc}")
+    return convert_file(msg_file, output_path, force=force)
+
+
 def _run(args: argparse.Namespace) -> list[ConversionResult]:
     input_path = Path(args.path)
 
@@ -83,16 +103,16 @@ def _run(args: argparse.Namespace) -> list[ConversionResult]:
             logger.warning("No .msg files found under %s", input_path)
         results = []
         for msg_file in msg_files:
-            output_path = resolve_batch_output_path(
-                msg_file, input_root=input_path, output=output_dir
+            resolve_output = functools.partial(
+                resolve_batch_output_path, msg_file, input_root=input_path, output=output_dir
             )
-            result = convert_file(msg_file, output_path, force=args.force)
+            result = _convert_one(msg_file, resolve_output, force=args.force)
             _log_result(result)
             results.append(result)
         return results
 
-    output_path = resolve_single_output_path(input_path, output=args.output)
-    result = convert_file(input_path, output_path, force=args.force)
+    resolve_output = functools.partial(resolve_single_output_path, input_path, output=args.output)
+    result = _convert_one(input_path, resolve_output, force=args.force)
     _log_result(result)
     return [result]
 

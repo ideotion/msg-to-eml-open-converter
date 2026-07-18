@@ -112,6 +112,30 @@ def test_missing_sender_and_date_are_omitted_with_warnings() -> None:
     assert any("synthetic" in w for w in warnings)
 
 
+def test_embedded_crlf_in_header_fields_cannot_inject_extra_headers() -> None:
+    msg = FakeMsg(
+        subject="Innocuous subject\r\nBcc: attacker@evil.com\r\nX-Injected: yes",
+        sender="Evil Sender\r\nBcc: attacker2@evil.com <evil@example.com>",
+        recipients=[
+            FakeRecipient(
+                email="victim@example.com", name="Attacker\r\nBcc: sneaky@evil.com", type=1
+            )
+        ],
+    )
+    eml = build_eml(msg)
+    raw = eml.as_bytes()
+    parsed = _roundtrip(eml)
+
+    # No newline in a header value ever reaches the wire (email.policy.default
+    # would otherwise raise ValueError, which -- unhandled -- would fail the
+    # whole conversion instead of just neutralizing the offending value).
+    assert not parsed.defects
+    assert parsed["Bcc"] is None
+    assert parsed["X-Injected"] is None
+    assert raw.count(b"Subject:") == 1
+    assert "\r\n" not in str(parsed["Subject"])
+
+
 def test_non_ascii_headers_are_rfc2047_encoded_and_roundtrip_cleanly() -> None:
     msg = FakeMsg(
         subject="Réunion : café à Nîmes",

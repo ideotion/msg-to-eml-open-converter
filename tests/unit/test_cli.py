@@ -184,3 +184,29 @@ def test_main_batch_continues_after_one_failure(
 
     assert exit_code == 1  # some failures occurred
     assert calls["count"] == 2  # both files were still attempted
+
+
+def test_main_batch_survives_symlink_pointing_outside_input_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file whose output path can't be resolved (e.g. relative_to raising for
+    a symlink escaping the walked root) must be reported as failed, not crash
+    the whole batch and take down files that would have converted fine."""
+    monkeypatch.chdir(tmp_path)
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    real_file = outside_dir / "real.msg"
+    _touch(real_file)
+    try:
+        (input_dir / "linked.msg").symlink_to(real_file)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not supported on this platform/filesystem")
+    _touch(input_dir / "normal.msg")
+    _stub_open_msg(monkeypatch, FakeMsg())
+
+    exit_code = main([str(input_dir), "-r", "-o", "out"])
+
+    assert exit_code == 1
+    assert (tmp_path / "out" / "normal.eml").exists()

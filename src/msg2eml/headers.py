@@ -10,6 +10,7 @@ last-resort fallback when a message has no recipient table at all.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from email.utils import formataddr, make_msgid, parseaddr
 from typing import Any
@@ -17,6 +18,21 @@ from typing import Any
 from extract_msg.enums import RecipientType
 
 Mailbox = tuple[str, str]
+
+_HEADER_LINEBREAK_RE = re.compile(r"[\r\n]+")
+
+
+def sanitize_header_value(value: str) -> str:
+    """Strip embedded CR/LF from a value bound for a header.
+
+    ``email.policy.default`` refuses to serialize a header value containing
+    a raw line break at all -- it raises ``ValueError`` -- which would fail
+    the whole message's conversion over a single stray control character in,
+    say, a subject line pulled from a messy or malicious .msg file. Folding
+    those characters out here means the header still gets a value (with the
+    injection attempt neutralized) and the rest of the conversion proceeds.
+    """
+    return _HEADER_LINEBREAK_RE.sub(" ", value).strip()
 
 
 def normalize_mailbox(raw: str | None) -> str | None:

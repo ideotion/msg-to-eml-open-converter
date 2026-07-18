@@ -64,14 +64,25 @@ def _as_text(value: Any) -> str | None:
     return str(value)
 
 
+def _set_header(email_msg: EmailMessage, name: str, value: str) -> None:
+    """Assign a header value, stripped of any embedded CR/LF.
+
+    Every header value in this module ultimately originates from
+    attacker-controllable .msg file content, so every assignment goes
+    through this one chokepoint rather than trusting each call site to
+    remember to sanitize -- see :func:`msg2eml.headers.sanitize_header_value`.
+    """
+    email_msg[name] = headers.sanitize_header_value(value)
+
+
 def _set_headers(email_msg: EmailMessage, msg: Any, warnings: list[str]) -> None:
     subject = getattr(msg, "subject", None)
     if subject:
-        email_msg["Subject"] = str(subject)
+        _set_header(email_msg, "Subject", str(subject))
 
     sender = headers.normalize_mailbox(getattr(msg, "sender", None))
     if sender:
-        email_msg["From"] = sender
+        _set_header(email_msg, "From", sender)
     else:
         warnings.append("Message has no sender; From header omitted")
 
@@ -80,32 +91,32 @@ def _set_headers(email_msg: EmailMessage, msg: Any, warnings: list[str]) -> None
     if any_recipients:
         for header_name, key in (("To", "to"), ("Cc", "cc"), ("Bcc", "bcc")):
             if groups[key]:
-                email_msg[header_name] = headers.address_header_value(groups[key])
+                _set_header(email_msg, header_name, headers.address_header_value(groups[key]))
     else:
         # No recipient table at all: fall back to extract-msg's raw display strings.
         for header_name, attr in (("To", "to"), ("Cc", "cc"), ("Bcc", "bcc")):
             raw = getattr(msg, attr, None)
             if raw:
-                email_msg[header_name] = str(raw)
+                _set_header(email_msg, header_name, str(raw))
 
     date = headers.resolve_date(msg)
     if date is not None:
-        email_msg["Date"] = format_datetime(date)
+        _set_header(email_msg, "Date", format_datetime(date))
     else:
         warnings.append("Message has no date; Date header omitted")
 
     message_id, generated = headers.resolve_message_id(msg)
-    email_msg["Message-ID"] = message_id
+    _set_header(email_msg, "Message-ID", message_id)
     if generated:
         warnings.append("Message had no Message-ID; a synthetic one was generated")
 
     in_reply_to = headers.resolve_in_reply_to(msg)
     if in_reply_to:
-        email_msg["In-Reply-To"] = in_reply_to
+        _set_header(email_msg, "In-Reply-To", in_reply_to)
 
     references = headers.resolve_references(msg)
     if references:
-        email_msg["References"] = references
+        _set_header(email_msg, "References", references)
 
 
 def _set_body(email_msg: EmailMessage, msg: Any, warnings: list[str]) -> str | None:

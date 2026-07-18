@@ -6,6 +6,17 @@ from msg2eml import headers
 from tests.helpers import FakeMsg, FakeRecipient
 
 
+def test_sanitize_header_value_strips_embedded_linebreaks() -> None:
+    assert headers.sanitize_header_value("Subject\r\nBcc: evil@example.com") == (
+        "Subject Bcc: evil@example.com"
+    )
+    assert headers.sanitize_header_value("a\nb\r\nc\rd") == "a b c d"
+
+
+def test_sanitize_header_value_leaves_clean_values_unchanged() -> None:
+    assert headers.sanitize_header_value("Clean subject") == "Clean subject"
+
+
 def test_normalize_mailbox_with_name_and_addr() -> None:
     assert headers.normalize_mailbox("Jane Doe <jane@example.com>") == "Jane Doe <jane@example.com>"
 
