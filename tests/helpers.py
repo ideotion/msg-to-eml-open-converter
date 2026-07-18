@@ -52,3 +52,10 @@ class FakeMsg:
     classType: str | None = "IPM.Note"
     recipients: list[Any] = field(default_factory=list)
     attachments: list[Any] = field(default_factory=list)
+
+    def __enter__(self) -> FakeMsg:
+        """Support use as a stand-in for extract_msg.openMsg()'s context manager result."""
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
