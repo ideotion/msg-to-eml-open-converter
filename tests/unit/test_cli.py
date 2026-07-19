@@ -7,11 +7,11 @@ import pytest
 
 import msg2eml.convert as convert_module
 from msg2eml.cli import main
-from tests.helpers import OLE2_MAGIC, FakeMsg
+from tests.helpers import OLE2_MAGIC, FakeCalendarItem, FakeMsg
 
 
-def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: FakeMsg | Exception) -> None:
-    def fake_open_msg(_path: str) -> FakeMsg:
+def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: object) -> None:
+    def fake_open_msg(_path: str) -> object:
         if isinstance(msg, Exception):
             raise msg
         return msg
@@ -57,18 +57,32 @@ def test_main_returns_one_on_conversion_failure(
     assert not (tmp_path / "bad.eml").exists()
 
 
-def test_main_skips_non_email_class_and_returns_zero(
+def test_main_skips_unsupported_class_and_returns_zero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    _touch(tmp_path / "note.msg")
+    _stub_open_msg(monkeypatch, FakeMsg(classType="IPM.StickyNote"))
+
+    exit_code = main(["note.msg"])
+
+    assert exit_code == 0
+    assert not (tmp_path / "note.eml").exists()
+    assert "Skipped" in capsys.readouterr().err
+
+
+def test_main_converts_calendar_item_to_ics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     _touch(tmp_path / "invite.msg")
-    _stub_open_msg(monkeypatch, FakeMsg(classType="IPM.Appointment"))
+    _stub_open_msg(monkeypatch, FakeCalendarItem(subject="Team sync"))
 
     exit_code = main(["invite.msg"])
 
     assert exit_code == 0
     assert not (tmp_path / "invite.eml").exists()
-    assert "Skipped" in capsys.readouterr().err
+    assert (tmp_path / "invite.ics").exists()
 
 
 def test_main_refuses_overwrite_without_force_then_succeeds_with_force(

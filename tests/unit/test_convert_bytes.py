@@ -7,11 +7,11 @@ import pytest
 
 import msg2eml.convert as convert_module
 from msg2eml.convert import convert_bytes
-from tests.helpers import OLE2_MAGIC, FakeMsg
+from tests.helpers import OLE2_MAGIC, FakeCalendarItem, FakeContact, FakeMsg, FakeTask
 
 
-def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: FakeMsg | Exception) -> None:
-    def fake_open_msg(_source: object) -> FakeMsg:
+def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: object) -> None:
+    def fake_open_msg(_source: object) -> object:
         if isinstance(msg, Exception):
             raise msg
         return msg
@@ -27,20 +27,56 @@ def test_convert_bytes_returns_eml_bytes_on_success(monkeypatch: pytest.MonkeyPa
     assert result.status == "converted"
     assert result.filename == "message.msg"
     assert result.error is None
-    assert result.eml_bytes is not None
-    parsed = BytesParser(policy=policy.default).parsebytes(result.eml_bytes)
+    assert result.output_format == "eml"
+    assert result.output_bytes is not None
+    parsed = BytesParser(policy=policy.default).parsebytes(result.output_bytes)
     assert not parsed.defects
     assert parsed["Subject"] == "Hello"
 
 
-def test_convert_bytes_reports_skipped_for_non_email_class(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_open_msg(monkeypatch, FakeMsg(classType="IPM.Appointment"))
+def test_convert_bytes_reports_skipped_for_unsupported_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_open_msg(monkeypatch, FakeMsg(classType="IPM.StickyNote"))
+
+    result = convert_bytes(OLE2_MAGIC + b"fake msg bytes", "note.msg")
+
+    assert result.status == "skipped"
+    assert result.output_bytes is None
+    assert any("StickyNote" in w for w in result.warnings)
+
+
+def test_convert_bytes_converts_calendar_item_to_ics(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_open_msg(monkeypatch, FakeCalendarItem(subject="Team sync"))
 
     result = convert_bytes(OLE2_MAGIC + b"fake msg bytes", "invite.msg")
 
-    assert result.status == "skipped"
-    assert result.eml_bytes is None
-    assert any("Appointment" in w for w in result.warnings)
+    assert result.status == "converted"
+    assert result.output_format == "ics"
+    assert result.output_bytes is not None
+    assert b"BEGIN:VCALENDAR" in result.output_bytes
+
+
+def test_convert_bytes_converts_contact_to_vcard(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_open_msg(monkeypatch, FakeContact(displayName="Alice Dupont"))
+
+    result = convert_bytes(OLE2_MAGIC + b"fake msg bytes", "contact.msg")
+
+    assert result.status == "converted"
+    assert result.output_format == "vcf"
+    assert result.output_bytes is not None
+    assert b"BEGIN:VCARD" in result.output_bytes
+
+
+def test_convert_bytes_converts_task_to_ics(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_open_msg(monkeypatch, FakeTask(subject="Finish report"))
+
+    result = convert_bytes(OLE2_MAGIC + b"fake msg bytes", "task.msg")
+
+    assert result.status == "converted"
+    assert result.output_format == "ics"
+    assert result.output_bytes is not None
+    assert b"BEGIN:VTODO" in result.output_bytes
 
 
 def test_convert_bytes_reports_failed_when_open_msg_raises_on_well_formed_input(
@@ -53,7 +89,7 @@ def test_convert_bytes_reports_failed_when_open_msg_raises_on_well_formed_input(
     result = convert_bytes(OLE2_MAGIC + b"garbage", "bad.msg")
 
     assert result.status == "failed"
-    assert result.eml_bytes is None
+    assert result.output_bytes is None
     assert "corrupt internal MSG structure" in (result.error or "")
 
 
@@ -76,7 +112,7 @@ def test_convert_bytes_rejects_non_ole2_input_without_calling_open_msg(
     result = convert_bytes(b"this is not a real msg file\n", "garbage.msg")
 
     assert result.status == "failed"
-    assert result.eml_bytes is None
+    assert result.output_bytes is None
     assert "OLE2" in (result.error or "")
     assert called is False
 

@@ -13,6 +13,7 @@ def test_write_report_creates_expected_json_structure(tmp_path: Path) -> None:
             input_path=Path("a.msg"),
             status="converted",
             output_path=Path("a.eml"),
+            output_format="eml",
             warnings=["some warning"],
         ),
         ConversionResult(input_path=Path("b.msg"), status="skipped", warnings=["not an email"]),
@@ -26,6 +27,7 @@ def test_write_report_creates_expected_json_structure(tmp_path: Path) -> None:
         {
             "input_path": "a.msg",
             "output_path": "a.eml",
+            "output_format": "eml",
             "status": "converted",
             "warnings": ["some warning"],
             "error": None,
@@ -33,6 +35,7 @@ def test_write_report_creates_expected_json_structure(tmp_path: Path) -> None:
         {
             "input_path": "b.msg",
             "output_path": None,
+            "output_format": None,
             "status": "skipped",
             "warnings": ["not an email"],
             "error": None,
@@ -40,6 +43,7 @@ def test_write_report_creates_expected_json_structure(tmp_path: Path) -> None:
         {
             "input_path": "c.msg",
             "output_path": None,
+            "output_format": None,
             "status": "failed",
             "warnings": [],
             "error": "boom",

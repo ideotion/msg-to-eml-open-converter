@@ -107,6 +107,12 @@ function base64ToBlob(base64, mimeType) {
   return new Blob([bytes], { type: mimeType });
 }
 
+const MIME_TYPES_BY_FORMAT = {
+  eml: "message/rfc822",
+  ics: "text/calendar",
+  vcf: "text/vcard",
+};
+
 async function convertPending() {
   const pending = entries.filter((e) => e.status === "pending");
   if (pending.length === 0) return;
@@ -140,11 +146,10 @@ async function convertPending() {
     entry.status = result.status;
     entry.warnings = result.warnings || [];
     entry.error = result.error;
-    if (result.emlBase64) {
-      entry.downloadUrl = URL.createObjectURL(
-        base64ToBlob(result.emlBase64, "message/rfc822")
-      );
-      entry.downloadName = result.emlFilename;
+    if (result.outputBase64) {
+      const mimeType = MIME_TYPES_BY_FORMAT[result.outputFormat] || "application/octet-stream";
+      entry.downloadUrl = URL.createObjectURL(base64ToBlob(result.outputBase64, mimeType));
+      entry.downloadName = result.outputFilename;
     }
   });
 

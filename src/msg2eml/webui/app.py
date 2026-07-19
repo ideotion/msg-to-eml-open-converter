@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100 MB per request; generous for typical .msg files
 
 
-def _eml_filename(raw_filename: str) -> str:
+def _output_filename(raw_filename: str, extension: str) -> str:
     """Derive a safe output filename from an uploaded .msg filename."""
     safe = sanitize_filename(raw_filename)
     stem = Path(safe).stem or "message"
-    return f"{stem}.eml"
+    return f"{stem}.{extension}"
 
 
 def create_app() -> Flask:
@@ -57,9 +57,10 @@ def create_app() -> Flask:
                 "warnings": result.warnings,
                 "error": result.error,
             }
-            if result.eml_bytes is not None:
-                entry["emlFilename"] = _eml_filename(raw_filename)
-                entry["emlBase64"] = base64.b64encode(result.eml_bytes).decode("ascii")
+            if result.output_bytes is not None and result.output_format is not None:
+                entry["outputFilename"] = _output_filename(raw_filename, result.output_format)
+                entry["outputFormat"] = result.output_format
+                entry["outputBase64"] = base64.b64encode(result.output_bytes).decode("ascii")
             results.append(entry)
 
         return jsonify({"results": results})

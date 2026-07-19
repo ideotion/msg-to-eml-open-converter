@@ -16,7 +16,13 @@ def discover_msg_files(root: Path, *, recursive: bool) -> list[Path]:
 
 
 def resolve_single_output_path(input_path: Path, *, output: str | None) -> Path:
-    """Compute the output .eml path for single-file mode.
+    """Compute a placeholder output path for single-file mode.
+
+    The ``.eml`` extension here is only a placeholder: the source's actual
+    message kind (and thus its real extension -- ``.eml``, ``.ics``, or
+    ``.vcf``) isn't known until the .msg file is opened and classified, so
+    :func:`msg2eml.convert.convert_file` swaps this path's suffix for the
+    real one before writing.
 
     With no ``-o``, the output sits next to the source file. With ``-o``,
     an existing directory (or a path that looks like one) is treated as a
@@ -35,7 +41,11 @@ def resolve_single_output_path(input_path: Path, *, output: str | None) -> Path:
 
 
 def resolve_batch_output_path(input_path: Path, *, input_root: Path, output: Path | None) -> Path:
-    """Compute the output .eml path for a file discovered while walking input_root.
+    """Compute a placeholder output path for a file discovered while walking input_root.
+
+    Like :func:`resolve_single_output_path`, the ``.eml`` extension here is
+    only a placeholder that :func:`msg2eml.convert.convert_file` replaces
+    with the real one once the source's message kind is known.
 
     With no ``-o``, each file's output sits next to its source, so the
     relative folder structure is naturally preserved. With ``-o``, the
