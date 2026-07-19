@@ -152,7 +152,10 @@ class FakeCalendarItem:
     appointmentStartWhole: datetime | None = None
     appointmentEndWhole: datetime | None = None
     appointmentSequence: int | None = None
+    appointmentSubType: bool = False
+    busyStatus: int | None = None
     isRecurring: bool = False
+    recurring: bool = False
     globalObjectID: Any = None
     cleanGlobalObjectID: Any = None
     recipients: list[Any] = field(default_factory=list)
