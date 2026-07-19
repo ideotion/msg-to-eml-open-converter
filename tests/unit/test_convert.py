@@ -10,7 +10,15 @@ import pytest
 
 from msg2eml.convert import build_eml, convert_file
 from msg2eml.exceptions import ConversionError
-from tests.helpers import OLE2_MAGIC, FakeAttachment, FakeMsg, FakeRecipient
+from tests.helpers import (
+    OLE2_MAGIC,
+    FakeAttachment,
+    FakeCalendarItem,
+    FakeContact,
+    FakeMsg,
+    FakeRecipient,
+    FakeTask,
+)
 
 UTC_DATE = datetime(2024, 5, 1, 10, 30, tzinfo=timezone.utc)
 
@@ -247,8 +255,70 @@ def test_nested_msg_attachment_becomes_message_rfc822() -> None:
     assert inner_msg["From"] == "inner@example.com"
 
 
+def test_nested_calendar_attachment_becomes_text_calendar_part() -> None:
+    inner = FakeCalendarItem(
+        subject="Nested invite",
+        appointmentStartWhole=UTC_DATE,
+        appointmentEndWhole=UTC_DATE,
+    )
+    outer = FakeMsg(
+        subject="See invite",
+        body="See attached",
+        attachments=[FakeAttachment(data=inner, type=1)],
+    )
+    eml = build_eml(outer)
+    parts = list(eml.iter_parts())
+    nested_part = parts[1]
+    assert nested_part.get_content_type() == "text/calendar"
+    assert nested_part.get_filename() == "Nested invite.ics"
+    assert nested_part["Content-Transfer-Encoding"] == "base64"
+
+
+def test_nested_contact_attachment_becomes_text_vcard_part() -> None:
+    inner = FakeContact(displayName="Alice Dupont")
+    outer = FakeMsg(
+        subject="See contact",
+        body="See attached",
+        attachments=[FakeAttachment(data=inner, type=1)],
+    )
+    eml = build_eml(outer)
+    nested_part = list(eml.iter_parts())[1]
+    assert nested_part.get_content_type() == "text/vcard"
+    assert nested_part.get_filename() == "Alice Dupont.vcf"
+
+
+def test_nested_task_attachment_becomes_text_calendar_part() -> None:
+    inner = FakeTask(subject="Nested task")
+    outer = FakeMsg(
+        subject="See task",
+        body="See attached",
+        attachments=[FakeAttachment(data=inner, type=1)],
+    )
+    eml = build_eml(outer)
+    nested_part = list(eml.iter_parts())[1]
+    assert nested_part.get_content_type() == "text/calendar"
+    assert nested_part.get_filename() == "Nested task.ics"
+
+
+def test_nested_unsupported_kind_attachment_is_skipped_with_warning() -> None:
+    class StickyNote:
+        classType = "IPM.StickyNote"
+        subject = "A sticky note"
+
+    outer = FakeMsg(
+        subject="See note",
+        body="See attached",
+        attachments=[FakeAttachment(data=StickyNote(), type=1)],
+    )
+    warnings: list[str] = []
+    eml = build_eml(outer, warnings=warnings)
+    assert eml.get_content_type() == "text/plain"
+    assert any("not a supported type" in w for w in warnings)
+
+
 def test_nested_msg_conversion_failure_is_recorded_as_warning_not_raised() -> None:
     class ExplodingInner:
+        classType = "IPM.Note"
         subject = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
 
     outer = FakeMsg(

@@ -9,7 +9,7 @@ flask_installed = pytest.importorskip("flask", reason="flask (the 'ui' extra) is
 
 import msg2eml.convert as convert_module  # noqa: E402
 from msg2eml.webui.app import create_app  # noqa: E402
-from tests.helpers import OLE2_MAGIC, FakeMsg  # noqa: E402
+from tests.helpers import OLE2_MAGIC, FakeCalendarItem, FakeContact, FakeMsg  # noqa: E402
 
 
 @pytest.fixture
@@ -20,8 +20,8 @@ def client(monkeypatch: pytest.MonkeyPatch):
         yield test_client
 
 
-def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: FakeMsg | Exception) -> None:
-    def fake_open_msg(_source: object) -> FakeMsg:
+def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: object) -> None:
+    def fake_open_msg(_source: object) -> object:
         if isinstance(msg, Exception):
             raise msg
         return msg
@@ -69,16 +69,32 @@ def test_convert_returns_eml_base64_for_a_valid_message(
     (result,) = response.get_json()["results"]
     assert result["status"] == "converted"
     assert result["filename"] == "message.msg"
-    assert result["emlFilename"] == "message.eml"
+    assert result["outputFilename"] == "message.eml"
+    assert result["outputFormat"] == "eml"
 
-    eml_bytes = base64.b64decode(result["emlBase64"])
+    eml_bytes = base64.b64decode(result["outputBase64"])
     assert b"Subject: Hello from the web UI" in eml_bytes
 
 
-def test_convert_reports_skipped_for_non_email_class(
+def test_convert_reports_skipped_for_unsupported_class(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _stub_open_msg(monkeypatch, FakeMsg(classType="IPM.Appointment"))
+    _stub_open_msg(monkeypatch, FakeMsg(classType="IPM.StickyNote"))
+
+    response = client.post(
+        "/convert",
+        data={"files": [_upload("note.msg", OLE2_MAGIC + b"rest")]},
+        content_type="multipart/form-data",
+    )
+
+    (result,) = response.get_json()["results"]
+    assert result["status"] == "skipped"
+    assert "outputBase64" not in result
+    assert any("StickyNote" in w for w in result["warnings"])
+
+
+def test_convert_returns_ics_for_a_calendar_item(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_open_msg(monkeypatch, FakeCalendarItem(subject="Team sync"))
 
     response = client.post(
         "/convert",
@@ -87,9 +103,26 @@ def test_convert_reports_skipped_for_non_email_class(
     )
 
     (result,) = response.get_json()["results"]
-    assert result["status"] == "skipped"
-    assert "emlBase64" not in result
-    assert any("Appointment" in w for w in result["warnings"])
+    assert result["status"] == "converted"
+    assert result["outputFormat"] == "ics"
+    assert result["outputFilename"] == "invite.ics"
+    assert b"BEGIN:VCALENDAR" in base64.b64decode(result["outputBase64"])
+
+
+def test_convert_returns_vcf_for_a_contact(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_open_msg(monkeypatch, FakeContact(displayName="Alice Dupont"))
+
+    response = client.post(
+        "/convert",
+        data={"files": [_upload("contact.msg", OLE2_MAGIC + b"rest")]},
+        content_type="multipart/form-data",
+    )
+
+    (result,) = response.get_json()["results"]
+    assert result["status"] == "converted"
+    assert result["outputFormat"] == "vcf"
+    assert result["outputFilename"] == "contact.vcf"
+    assert b"BEGIN:VCARD" in base64.b64decode(result["outputBase64"])
 
 
 def test_convert_reports_failed_for_garbage_upload_without_crashing(client) -> None:
@@ -103,7 +136,7 @@ def test_convert_reports_failed_for_garbage_upload_without_crashing(client) -> N
     (result,) = response.get_json()["results"]
     assert result["status"] == "failed"
     assert "OLE2" in result["error"]
-    assert "emlBase64" not in result
+    assert "outputBase64" not in result
 
 
 def test_convert_handles_multiple_files_in_one_request(
@@ -144,8 +177,8 @@ def test_convert_sanitizes_path_traversal_style_upload_filename(
 
     (result,) = response.get_json()["results"]
     assert "/" not in result["filename"]
-    assert "/" not in result["emlFilename"]
-    assert result["emlFilename"].endswith(".eml")
+    assert "/" not in result["outputFilename"]
+    assert result["outputFilename"].endswith(".eml")
 
 
 def test_request_entity_too_large_returns_clean_413(monkeypatch: pytest.MonkeyPatch) -> None:

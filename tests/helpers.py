@@ -66,3 +66,102 @@ class FakeMsg:
 
     def __exit__(self, *exc_info: object) -> None:
         return None
+
+
+@dataclass
+class FakeContact:
+    """A minimal stand-in for an extract_msg Contact object."""
+
+    classType: str | None = "IPM.Contact"
+    displayName: str | None = None
+    givenName: str | None = None
+    surname: str | None = None
+    middleName: str | None = None
+    displayNamePrefix: str | None = None
+    generation: str | None = None
+    companyName: str | None = None
+    jobTitle: str | None = None
+    email1EmailAddress: str | None = None
+    email2EmailAddress: str | None = None
+    email3EmailAddress: str | None = None
+    businessTelephoneNumber: str | None = None
+    homeTelephoneNumber: str | None = None
+    mobileTelephoneNumber: str | None = None
+    businessFaxNumber: str | None = None
+    homeFaxNumber: str | None = None
+    workAddressStreet: str | None = None
+    workAddressLocality: str | None = None
+    workAddressStateOrProvince: str | None = None
+    workAddressPostalCode: str | None = None
+    workAddressCountry: str | None = None
+    workAddressPostOfficeBox: str | None = None
+    homeAddressStreet: str | None = None
+    homeAddressLocality: str | None = None
+    homeAddressStateOrProvince: str | None = None
+    homeAddressPostalCode: str | None = None
+    homeAddressCountry: str | None = None
+    homeAddressPostOfficeBox: str | None = None
+    otherAddressStreet: str | None = None
+    otherAddressLocality: str | None = None
+    otherAddressStateOrProvince: str | None = None
+    otherAddressPostalCode: str | None = None
+    otherAddressCountry: str | None = None
+    otherAddressPostOfficeBox: str | None = None
+    birthday: datetime | None = None
+    contactPhoto: bytes | None = None
+    body: str | None = None
+    webpageUrl: str | None = None
+
+    def __enter__(self) -> FakeContact:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+@dataclass
+class FakeTask:
+    """A minimal stand-in for an extract_msg Task object."""
+
+    classType: str | None = "IPM.Task"
+    subject: str | None = "Test task"
+    body: str | None = None
+    taskStartDate: datetime | None = None
+    taskDueDate: datetime | None = None
+    taskStatus: Any = None
+    percentComplete: float | None = None
+    taskDateCompleted: datetime | None = None
+    importance: Any = None
+
+    def __enter__(self) -> FakeTask:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+@dataclass
+class FakeCalendarItem:
+    """A minimal stand-in for an extract_msg CalendarBase-derived object."""
+
+    classType: str | None = "IPM.Appointment"
+    subject: str | None = "Test appointment"
+    body: str | None = None
+    location: str | None = None
+    organizer: str | None = None
+    appointmentStartWhole: datetime | None = None
+    appointmentEndWhole: datetime | None = None
+    appointmentSequence: int | None = None
+    appointmentSubType: bool = False
+    busyStatus: int | None = None
+    isRecurring: bool = False
+    recurring: bool = False
+    globalObjectID: Any = None
+    cleanGlobalObjectID: Any = None
+    recipients: list[Any] = field(default_factory=list)
+
+    def __enter__(self) -> FakeCalendarItem:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None

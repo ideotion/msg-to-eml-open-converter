@@ -24,7 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the msg2eml argument parser."""
     parser = argparse.ArgumentParser(
         prog="msg2eml",
-        description="Convert Microsoft Outlook .msg files into standard .eml (RFC 5322/MIME) files.",
+        description=(
+            "Convert Microsoft Outlook .msg files into standard, Thunderbird-compatible "
+            "open formats: .eml (RFC 5322/MIME) for email, .ics (iCalendar) for calendar "
+            "items and tasks, and .vcf (vCard) for contacts."
+        ),
     )
     parser.add_argument(
         "path",
@@ -34,7 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         metavar="PATH",
-        help="Output .eml file or directory (default: write next to each source file)",
+        help=(
+            "Output file or directory (default: write next to each source file). "
+            "The output extension is chosen automatically from the source's type."
+        ),
     )
     parser.add_argument(
         "-r",
@@ -45,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing output .eml files instead of skipping them",
+        help="Overwrite existing output files instead of skipping them",
     )
     parser.add_argument(
         "--json-report",

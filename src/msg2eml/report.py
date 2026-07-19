@@ -14,6 +14,7 @@ def write_report(results: list[ConversionResult], report_path: Path) -> None:
         {
             "input_path": str(result.input_path),
             "output_path": str(result.output_path) if result.output_path else None,
+            "output_format": result.output_format,
             "status": result.status,
             "warnings": result.warnings,
             "error": result.error,

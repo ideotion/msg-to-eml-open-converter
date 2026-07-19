@@ -1,36 +1,52 @@
 # msg2eml
 
-Convert Microsoft Outlook `.msg` files into standard `.eml` files that open
-in Thunderbird, Apple Mail, Gmail's import tools, or any other email
-program that understands the standard email format.
+Convert Microsoft Outlook `.msg` files into standard, open formats that
+open in Thunderbird, Apple Mail, Gmail's import tools, or any other program
+that understands them: `.eml` for emails, `.ics` for calendar items and
+tasks, and `.vcf` for contacts.
 
 ## Why would I need this?
 
-Outlook saves individual emails in a proprietary format called `.msg`.
-Most other mail programs can't open `.msg` files at all. `.eml` is the
-open, standard format (technically: RFC 5322 / MIME) that virtually every
-other email program *can* open, including Thunderbird.
+Outlook saves items in a proprietary format called `.msg`. Most other
+programs can't open `.msg` files at all. `msg2eml` converts each `.msg`
+file to the open, standard format its content actually calls for:
 
-`msg2eml` is a command-line tool that converts `.msg` files to `.eml`
-files. It keeps as much of the original message intact as possible:
+- **Emails** become `.eml` (RFC 5322 / MIME), openable by virtually every
+  email program, including Thunderbird.
+- **Calendar items and meeting invitations** (`IPM.Appointment`,
+  `IPM.Schedule.Meeting.*`) become `.ics` (iCalendar).
+- **Tasks** (`IPM.Task`) also become `.ics`, as an iCalendar to-do item.
+- **Contacts** (`IPM.Contact`) become `.vcf` (vCard 3.0), importable into
+  Thunderbird's Address Book or any other contacts app.
 
-- The subject, sender, recipients (To/Cc/Bcc), and date.
-- The message body — including formatting, if the original had an HTML
-  body, or a de-encapsulated version if the original only had a
-  Microsoft-specific "Rich Text Format" body.
+`msg2eml` picks the right format automatically — you don't need to tell it
+what kind of `.msg` file you're giving it. It keeps as much of the original
+item intact as possible:
+
+- For emails: the subject, sender, recipients (To/Cc/Bcc), date, and body
+  (including formatting, if the original had an HTML body, or a
+  de-encapsulated version if the original only had a Microsoft-specific
+  "Rich Text Format" body).
 - File attachments, with their original names and file types preserved.
-- Pictures embedded directly in the email body (not as separate
+- Pictures embedded directly in an email body (not as separate
   attachments) — these still show up inline, not as attachments, in the
   converted email.
-- Emails-within-emails (a forwarded or attached `.msg` file) — these are
-  converted too, and kept attached to the outer email.
-- Accented and non-English characters (e.g. é, à, ç, ü) in the subject,
-  sender name, body, and attachment file names.
+- Items-within-items (a forwarded or attached `.msg` file, of any of the
+  kinds above) — these are converted too, and kept attached to the outer
+  item with the correct type.
+- Accented and non-English characters (e.g. é, à, ç, ü) throughout.
+- For calendar items: subject, location, body, start/end time, organizer,
+  attendees, and busy/tentative/free status.
+- For tasks: subject, body, start/due dates, completion date and percent,
+  status, and priority.
+- For contacts: name, company, job title, email addresses, phone numbers,
+  postal addresses, birthday, photo, and notes.
 
-It will **not** convert calendar invitations, contacts, tasks, or sticky
-notes saved as `.msg` files — only actual emails. If you point it at one of
-those by mistake, it tells you and skips it instead of producing a broken
-file.
+Sticky notes, distribution lists, journal entries, and other Outlook item
+types saved as `.msg` are not converted — if you point `msg2eml` at one of
+those, it tells you and skips it instead of producing a broken file. See
+[Known limitations](#known-limitations) for calendar/task/contact-specific
+caveats (in particular, recurring events and meeting-invite semantics).
 
 ## Installation
 
@@ -100,7 +116,10 @@ works.)
 msg2eml message.msg
 ```
 
-This creates `message.eml` in the same folder as `message.msg`.
+This creates `message.eml` next to `message.msg` — or `message.ics` /
+`message.vcf`, if `message.msg` turns out to be a calendar item, task, or
+contact instead of an email; `msg2eml` figures that out automatically once
+it opens the file.
 
 To choose a different output file or folder, use `-o`:
 
@@ -109,6 +128,10 @@ msg2eml message.msg -o converted-message.eml
 msg2eml message.msg -o /path/to/some/folder/
 ```
 
+(If `-o` names a specific file, its extension is still replaced with the
+correct one for what the source turns out to be — `-o out.eml` for a
+contact becomes `out.vcf`.)
+
 ### Convert a whole folder of `.msg` files
 
 ```sh
@@ -116,8 +139,8 @@ msg2eml ./my-outlook-export -r
 ```
 
 This finds every `.msg` file inside `./my-outlook-export` — including
-subfolders, because of `-r` — and converts each one, saving each `.eml`
-right next to the `.msg` file it came from.
+subfolders, because of `-r` — and converts each one to whichever format
+matches its content, saving it right next to the `.msg` file it came from.
 
 To collect all the converted files into a separate folder instead (with
 the same subfolder structure preserved), add `-o`:
@@ -177,9 +200,9 @@ installed with pipx).
 | Option | What it does |
 | --- | --- |
 | `path` | The `.msg` file, or folder of `.msg` files, to convert. Required. |
-| `-o PATH`, `--output PATH` | Where to write the result. For a single file, this can be a specific output file name or a folder. For a folder input, this is always treated as the destination folder. If omitted, output files are written next to their source files. |
+| `-o PATH`, `--output PATH` | Where to write the result. For a single file, this can be a specific output file name or a folder. For a folder input, this is always treated as the destination folder. If omitted, output files are written next to their source files. The extension is always chosen automatically based on the source's content (`.eml`/`.ics`/`.vcf`), even if `PATH` names a specific file with a different extension. |
 | `-r`, `--recursive` | When converting a folder, also look inside its subfolders. |
-| `--force` | Overwrite an output `.eml` file if it already exists. Without this, `msg2eml` refuses to overwrite existing files so you don't lose previous work by accident. |
+| `--force` | Overwrite an output file if it already exists. Without this, `msg2eml` refuses to overwrite existing files so you don't lose previous work by accident. |
 | `--json-report PATH` | Write a JSON summary of the run (status, warnings, output path for every file) to `PATH`. |
 | `--verbose` | Print extra detail while converting, including every warning encountered (missing sender, RTF that couldn't be converted cleanly, etc.). |
 | `--quiet` | Print nothing except errors. Useful for scripts. |
@@ -194,15 +217,26 @@ run went:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Everything that could be converted, was converted (this includes runs where some files were legitimately skipped, e.g. calendar invites). |
+| `0` | Everything that could be converted, was converted (this includes runs where some files were legitimately skipped, e.g. sticky notes). |
 | `1` | The run finished, but at least one file failed to convert. Check the log output or `--json-report` for details. |
 | `2` | The run could not start at all — for example, the given path doesn't exist, or isn't a `.msg` file. |
 
 ## Known limitations
 
-- Only email items are converted. Calendar invitations, contacts, tasks,
-  sticky notes, and similar Outlook item types stored as `.msg` are
-  detected and skipped with a warning, not converted.
+- Sticky notes, distribution lists, journal entries, and similar Outlook
+  item types stored as `.msg` are detected and skipped with a warning, not
+  converted — there's no open, standard format they'd meaningfully map to.
+- **Calendar items are exported as standalone `.ics` files, not
+  invite-shaped emails.** This is a deliberate choice: Thunderbird's
+  plain file-based `.ics` import has no UID/SEQUENCE-aware update logic
+  (re-importing an updated `.ics` for the same event causes a duplicate,
+  rather than updating it), unlike its mail-integrated meeting-invite
+  handling. Converting meeting invites to invite-shaped `.eml` files
+  (with an embedded `text/calendar` part) is a possible future addition.
+- **Recurring calendar events are exported as a single occurrence**, not
+  a recurring series — decoding Outlook's internal recurrence-pattern
+  format into an iCalendar `RRULE` is not yet implemented. A warning is
+  included when this happens.
 - If an email's body only exists as Microsoft's Rich Text Format (no plain
   text or HTML version was saved), `msg2eml` tries to convert it to HTML.
   This conversion is very reliable for typical Outlook emails, but for
@@ -212,11 +246,12 @@ run went:
 - Password-protected or DRM/rights-managed (IRM) messages are not
   supported.
 - Very old or unusual `.msg` files that are missing standard information
-  (like a sender or a date) will convert successfully, but the resulting
-  `.eml` will simply be missing that piece of information too — `msg2eml`
-  never invents data that wasn't in the original file (except that it
-  will generate a technical Message-ID if the original had none at all,
-  since some mail programs expect every email to have one).
+  (like a sender, a date, or an event's start time) will convert
+  successfully, but the result will simply be missing that piece of
+  information too — `msg2eml` never invents data that wasn't in the
+  original file (except that it will generate a technical Message-ID for
+  an email that had none at all, since some mail programs expect every
+  email to have one).
 
 ## Troubleshooting
 
@@ -227,9 +262,11 @@ in `.msg`. Double check the file path.
 already created (or that happens to have the same name) unless you pass
 `--force`.
 
-**A file shows up as "Skipped"** — This is normal for calendar invites,
-contacts, tasks, and similar non-email items; they can't be meaningfully
-turned into an email. Run with `--verbose` to see the exact reason.
+**A file shows up as "Skipped"** — This is normal for sticky notes,
+distribution lists, journal entries, and similar Outlook item types that
+have no open-format equivalent to convert to. Run with `--verbose` to see
+the exact reason. (Calendar items, tasks, and contacts are *not* skipped —
+they're converted to `.ics`/`.vcf`.)
 
 **A file shows up as "Failed"** — The `.msg` file is likely corrupted,
 password-protected, or otherwise unreadable. Run with `--verbose` to see
@@ -256,8 +293,20 @@ another `msg2eml-ui`) is already using port 5151. Either stop that, or run
 This project uses [`extract-msg`](https://github.com/TeamMsgExtractor/msg-extractor)
 to parse the `.msg` (OLE2 compound file) format, [`RTFDE`](https://github.com/seamustuohy/RTFDE)
 and `compressed-rtf` to de-encapsulate Rich Text Format bodies into HTML,
-the Python standard library's `email` package to build the resulting
-`.eml` files, and (optionally, for the web interface) Flask.
+the Python standard library's `email` package to build `.eml` output,
+[`icalendar`](https://icalendar.readthedocs.io/) to build `.ics` output
+(both calendar `VEVENT`s and task `VTODO`s), [`vobject`](https://github.com/py-vobject/vobject)
+to build `.vcf` (vCard) output, and (optionally, for the web interface)
+Flask.
+
+`msg2eml.convert` classifies each parsed `.msg` object by
+`msg2eml.msgclass.MessageKind` and dispatches it to the matching builder:
+`build_eml` (in `convert.py` itself) for email, `msg2eml.calendar_convert`
+for calendar items, `msg2eml.contact_convert` for contacts, and
+`msg2eml.task_convert` for tasks. Every builder is written entirely against
+duck-typed "parsed message" objects (only `getattr`, never `isinstance`
+checks against `extract_msg` classes), so each has its own fast unit tests
+using simple fakes from `tests/helpers.py` rather than real `.msg` files.
 
 ```sh
 python3 -m venv .venv

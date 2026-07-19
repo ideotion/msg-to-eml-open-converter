@@ -1,15 +1,20 @@
-"""Core conversion: build an ``EmailMessage`` from a parsed .msg object.
+"""Core conversion: dispatch a parsed .msg object to its matching builder.
 
-:func:`build_eml` is written entirely against duck-typed "parsed message"
-objects -- it only ever uses ``getattr``, never ``isinstance`` checks
-against ``extract_msg`` classes -- so it can be unit tested with simple
-fakes and does not care whether it is called with a real
-``extract_msg.Message`` or a nested embedded message object.
+:func:`_build_for_msg` classifies a parsed .msg object by
+:class:`msg2eml.msgclass.MessageKind` and hands it to the builder for that
+kind -- :func:`build_eml` for email, or the ``build_ics``/``build_vcard``
+functions in :mod:`msg2eml.calendar_convert`, :mod:`msg2eml.contact_convert`,
+and :mod:`msg2eml.task_convert` for calendar, contact, and task items. Every
+builder is written entirely against duck-typed "parsed message" objects --
+only ``getattr``, never ``isinstance`` checks against ``extract_msg``
+classes -- so each can be unit tested with simple fakes and doesn't care
+whether it's called with a real ``extract_msg`` object or a nested embedded
+message object.
 
-Headers are built with ``email.policy.default`` (not ``utf8=True``): this
-produces real RFC 2047 encoded headers for non-ASCII content, which is
-readable by every standards-compliant client, rather than raw UTF-8
-headers that require SMTPUTF8 support.
+Headers of the ``.eml`` output are built with ``email.policy.default`` (not
+``utf8=True``): this produces real RFC 2047 encoded headers for non-ASCII
+content, which is readable by every standards-compliant client, rather than
+raw UTF-8 headers that require SMTPUTF8 support.
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from typing import Any, Literal
 import extract_msg
 from extract_msg.exceptions import ExMsgBaseException
 
-from msg2eml import headers, msgclass, rtf
+from msg2eml import calendar_convert, contact_convert, headers, msgclass, rtf, task_convert
 from msg2eml.attachments import (
     attachment_filename,
     clean_content_id,
@@ -51,8 +56,29 @@ class ConversionResult:
     input_path: Path
     status: Status
     output_path: Path | None = None
+    output_format: str | None = None
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class BuildOutput:
+    """The built output of converting one parsed .msg object.
+
+    ``content`` is always the ready-to-write bytes of the output document,
+    regardless of kind. ``email_message`` is populated only when ``kind`` is
+    :attr:`msgclass.MessageKind.EMAIL`: a nested email-kind .msg attachment
+    must be attached as a ``message/rfc822`` part using the actual
+    ``EmailMessage`` object (not raw bytes), so the content manager encodes
+    it per RFC 2046 5.2.1 instead of base64-encoding it like an opaque blob.
+    """
+
+    kind: msgclass.MessageKind
+    extension: str
+    maintype: str
+    subtype: str
+    content: bytes
+    email_message: EmailMessage | None = None
 
 
 def _as_text(value: Any) -> str | None:
@@ -175,18 +201,38 @@ def _add_nested_message(
 
     nested_warnings: list[str] = []
     try:
-        nested_eml = build_eml(nested_msg, warnings=nested_warnings, _depth=depth + 1)
+        output = _build_for_msg(nested_msg, nested_warnings, depth + 1)
     except Exception:
         logger.debug("Failed to convert nested .msg attachment %s", index, exc_info=True)
         warnings.append(f"Nested message attachment {index} could not be converted and was skipped")
         return
 
     warnings.extend(f"(nested attachment {index}) {w}" for w in nested_warnings)
-    subject = nested_eml.get("Subject") or "message"
-    filename = f"{sanitize_filename(str(subject), default='message')}.eml"
-    # message/rfc822 parts are not base64-encoded per RFC 2046 5.2.1; the
-    # content manager handles this automatically for Message/EmailMessage payloads.
-    email_msg.add_attachment(nested_eml, subtype="rfc822", filename=filename)
+    if output is None:
+        # A skip reason was already recorded in nested_warnings above (e.g. a
+        # calendar invite or contact card attached as a file, of a kind
+        # msg2eml doesn't support embedding as a nested attachment yet).
+        return
+
+    if output.email_message is not None:
+        title = output.email_message.get("Subject") or "message"
+    else:
+        # Contacts have no "subject" -- fall back to their display name.
+        title = (
+            getattr(nested_msg, "subject", None)
+            or getattr(nested_msg, "displayName", None)
+            or "attachment"
+        )
+    filename = f"{sanitize_filename(str(title), default='message')}.{output.extension}"
+
+    if output.email_message is not None:
+        # message/rfc822 parts are not base64-encoded per RFC 2046 5.2.1; the
+        # content manager handles this automatically for Message/EmailMessage payloads.
+        email_msg.add_attachment(output.email_message, subtype="rfc822", filename=filename)
+    else:
+        email_msg.add_attachment(
+            output.content, maintype=output.maintype, subtype=output.subtype, filename=filename
+        )
 
 
 def _set_attachments(
@@ -253,6 +299,57 @@ def build_eml(msg: Any, *, warnings: list[str] | None = None, _depth: int = 0) -
     return email_msg
 
 
+def _build_for_msg(msg: Any, warnings: list[str], depth: int) -> BuildOutput | None:
+    """Dispatch a parsed .msg object to the builder matching its message kind.
+
+    Returns ``None`` if the message class isn't a kind msg2eml can convert (a
+    "Skipped: ..." warning is appended in that case). Exceptions from the
+    underlying builder propagate to the caller.
+    """
+    class_type = getattr(msg, "classType", None)
+    kind = msgclass.classify(class_type)
+
+    if kind is msgclass.MessageKind.EMAIL:
+        email_msg = build_eml(msg, warnings=warnings, _depth=depth)
+        return BuildOutput(
+            kind=kind,
+            extension="eml",
+            maintype="message",
+            subtype="rfc822",
+            content=email_msg.as_bytes(),
+            email_message=email_msg,
+        )
+    if kind is msgclass.MessageKind.CALENDAR:
+        return BuildOutput(
+            kind=kind,
+            extension="ics",
+            maintype="text",
+            subtype="calendar",
+            content=calendar_convert.build_ics(msg, warnings=warnings),
+        )
+    if kind is msgclass.MessageKind.CONTACT:
+        return BuildOutput(
+            kind=kind,
+            extension="vcf",
+            maintype="text",
+            subtype="vcard",
+            content=contact_convert.build_vcard(msg, warnings=warnings),
+        )
+    if kind is msgclass.MessageKind.TASK:
+        return BuildOutput(
+            kind=kind,
+            extension="ics",
+            maintype="text",
+            subtype="calendar",
+            content=task_convert.build_task_ics(msg, warnings=warnings),
+        )
+
+    warnings.append(
+        f"Skipped: message class {msgclass.describe(class_type)} is not a supported type"
+    )
+    return None
+
+
 _OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
@@ -275,16 +372,16 @@ def _looks_like_ole2(source: str | bytes) -> bool:
         return False
 
 
-def _open_and_build(source: str | bytes, warnings: list[str]) -> EmailMessage | None:
-    """Open a .msg source, apply message-class gating, and build its EmailMessage.
+def _open_and_build(source: str | bytes, warnings: list[str]) -> BuildOutput | None:
+    """Open a .msg source and dispatch it to the builder matching its message kind.
 
     ``source`` is anything ``extract_msg.openMsg`` accepts -- a file path
     string or raw bytes -- which lets this same helper back both on-disk
     (:func:`convert_file`) and in-memory (:func:`convert_bytes`) conversion,
-    so every caller shares one code path for the class-gating and header/body/
-    attachment hardening in :func:`build_eml`.
+    so every caller shares one code path for message-kind dispatch and the
+    header/body/attachment hardening in :func:`build_eml`.
 
-    Returns ``None`` if the message class isn't a supported email type (a
+    Returns ``None`` if the message class isn't a supported kind (a
     "Skipped: ..." warning is appended in that case). Exceptions propagate to
     the caller, which is expected to catch them broadly -- a genuinely
     unreadable/corrupt file must never raise all the way to a batch loop.
@@ -302,40 +399,44 @@ def _open_and_build(source: str | bytes, warnings: list[str]) -> EmailMessage | 
         raise
 
     with opened as msg:
-        class_type = getattr(msg, "classType", None)
-        if not msgclass.is_convertible(class_type):
-            warnings.append(
-                f"Skipped: message class {msgclass.describe(class_type)} "
-                "is not a supported email type"
-            )
-            return None
-        return build_eml(msg, warnings=warnings)
+        return _build_for_msg(msg, warnings, 0)
 
 
 def convert_file(input_path: Path, output_path: Path, *, force: bool = False) -> ConversionResult:
-    """Convert a single .msg file on disk to a .eml file on disk.
+    """Convert a single .msg file on disk to its matching output file on disk.
 
-    Never raises: any failure is captured in the returned
-    :class:`ConversionResult` with ``status="failed"``, so a batch run can
-    continue past malformed or unreadable input files.
+    The output's real extension depends on the source message's kind (e.g.
+    ``.eml`` for email, ``.ics`` for calendar/task items, ``.vcf`` for
+    contacts), which isn't known until the file is opened and classified --
+    so ``output_path``'s extension is only a placeholder, swapped for the
+    real one before writing. Never raises: any failure is captured in the
+    returned :class:`ConversionResult` with ``status="failed"``, so a batch
+    run can continue past malformed or unreadable input files.
     """
     warnings: list[str] = []
     try:
-        if output_path.exists() and not force:
+        output = _open_and_build(str(input_path), warnings)
+        if output is None:
+            return ConversionResult(input_path, "skipped", warnings=warnings)
+
+        final_output_path = output_path.with_suffix(f".{output.extension}")
+        if final_output_path.exists() and not force:
             return ConversionResult(
                 input_path,
                 "failed",
                 warnings=warnings,
-                error=f"Output file already exists: {output_path} (use --force to overwrite)",
+                error=f"Output file already exists: {final_output_path} (use --force to overwrite)",
             )
 
-        email_msg = _open_and_build(str(input_path), warnings)
-        if email_msg is None:
-            return ConversionResult(input_path, "skipped", warnings=warnings)
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(email_msg.as_bytes())
-        return ConversionResult(input_path, "converted", output_path=output_path, warnings=warnings)
+        final_output_path.parent.mkdir(parents=True, exist_ok=True)
+        final_output_path.write_bytes(output.content)
+        return ConversionResult(
+            input_path,
+            "converted",
+            output_path=final_output_path,
+            output_format=output.extension,
+            warnings=warnings,
+        )
     except Exception as exc:
         logger.debug("Failed to convert %s", input_path, exc_info=True)
         return ConversionResult(input_path, "failed", warnings=warnings, error=str(exc))
@@ -347,24 +448,29 @@ class BytesConversionResult:
 
     filename: str
     status: Status
-    eml_bytes: bytes | None = None
+    output_bytes: bytes | None = None
+    output_format: str | None = None
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
 
 
 def convert_bytes(data: bytes, filename: str) -> BytesConversionResult:
-    """Convert raw .msg bytes to .eml bytes, entirely in memory.
+    """Convert raw .msg bytes to output bytes, entirely in memory.
 
     Never raises, for the same reason :func:`convert_file` doesn't: a
     malformed upload must become a "failed" result, not a crash.
     """
     warnings: list[str] = []
     try:
-        email_msg = _open_and_build(data, warnings)
-        if email_msg is None:
+        output = _open_and_build(data, warnings)
+        if output is None:
             return BytesConversionResult(filename, "skipped", warnings=warnings)
         return BytesConversionResult(
-            filename, "converted", eml_bytes=email_msg.as_bytes(), warnings=warnings
+            filename,
+            "converted",
+            output_bytes=output.content,
+            output_format=output.extension,
+            warnings=warnings,
         )
     except Exception as exc:
         logger.debug("Failed to convert %s", filename, exc_info=True)
