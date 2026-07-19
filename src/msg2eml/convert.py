@@ -253,6 +253,65 @@ def build_eml(msg: Any, *, warnings: list[str] | None = None, _depth: int = 0) -
     return email_msg
 
 
+_OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _looks_like_ole2(source: str | bytes) -> bool:
+    """Sniff the OLE2 Compound File Binary Format signature every .msg file has.
+
+    Checked upfront so obviously-invalid input gets one clean, consistent
+    error message instead of whatever ``extract_msg.openMsg`` happens to
+    raise for it -- notably, handed a short byte string that could plausibly
+    be a path, it tries to open it as a file and raises a raw
+    ``FileNotFoundError`` quoting the bytes back verbatim, which is a
+    confusing message for something that was never meant to be a path.
+    """
+    if isinstance(source, bytes):
+        return source.startswith(_OLE2_MAGIC)
+    try:
+        with open(source, "rb") as fh:
+            return fh.read(len(_OLE2_MAGIC)) == _OLE2_MAGIC
+    except OSError:
+        return False
+
+
+def _open_and_build(source: str | bytes, warnings: list[str]) -> EmailMessage | None:
+    """Open a .msg source, apply message-class gating, and build its EmailMessage.
+
+    ``source`` is anything ``extract_msg.openMsg`` accepts -- a file path
+    string or raw bytes -- which lets this same helper back both on-disk
+    (:func:`convert_file`) and in-memory (:func:`convert_bytes`) conversion,
+    so every caller shares one code path for the class-gating and header/body/
+    attachment hardening in :func:`build_eml`.
+
+    Returns ``None`` if the message class isn't a supported email type (a
+    "Skipped: ..." warning is appended in that case). Exceptions propagate to
+    the caller, which is expected to catch them broadly -- a genuinely
+    unreadable/corrupt file must never raise all the way to a batch loop.
+    """
+    if not _looks_like_ole2(source):
+        raise ConversionError("This is not a valid .msg file (not an OLE2 compound file)")
+
+    try:
+        opened = extract_msg.openMsg(source)
+    except ExMsgBaseException as exc:
+        kind = type(exc).__name__
+        if kind in {"UnsupportedMSGTypeError", "UnrecognizedMSGTypeError"}:
+            warnings.append(f"Skipped: {exc}")
+            return None
+        raise
+
+    with opened as msg:
+        class_type = getattr(msg, "classType", None)
+        if not msgclass.is_convertible(class_type):
+            warnings.append(
+                f"Skipped: message class {msgclass.describe(class_type)} "
+                "is not a supported email type"
+            )
+            return None
+        return build_eml(msg, warnings=warnings)
+
+
 def convert_file(input_path: Path, output_path: Path, *, force: bool = False) -> ConversionResult:
     """Convert a single .msg file on disk to a .eml file on disk.
 
@@ -270,25 +329,9 @@ def convert_file(input_path: Path, output_path: Path, *, force: bool = False) ->
                 error=f"Output file already exists: {output_path} (use --force to overwrite)",
             )
 
-        try:
-            opened = extract_msg.openMsg(str(input_path))
-        except ExMsgBaseException as exc:
-            kind = type(exc).__name__
-            if kind in {"UnsupportedMSGTypeError", "UnrecognizedMSGTypeError"}:
-                warnings.append(f"Skipped: {exc}")
-                return ConversionResult(input_path, "skipped", warnings=warnings)
-            raise
-
-        with opened as msg:
-            class_type = getattr(msg, "classType", None)
-            if not msgclass.is_convertible(class_type):
-                warnings.append(
-                    f"Skipped: message class {msgclass.describe(class_type)} "
-                    "is not a supported email type"
-                )
-                return ConversionResult(input_path, "skipped", warnings=warnings)
-
-            email_msg = build_eml(msg, warnings=warnings)
+        email_msg = _open_and_build(str(input_path), warnings)
+        if email_msg is None:
+            return ConversionResult(input_path, "skipped", warnings=warnings)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(email_msg.as_bytes())
@@ -296,3 +339,33 @@ def convert_file(input_path: Path, output_path: Path, *, force: bool = False) ->
     except Exception as exc:
         logger.debug("Failed to convert %s", input_path, exc_info=True)
         return ConversionResult(input_path, "failed", warnings=warnings, error=str(exc))
+
+
+@dataclass
+class BytesConversionResult:
+    """Outcome of converting in-memory .msg bytes (used by the local web UI)."""
+
+    filename: str
+    status: Status
+    eml_bytes: bytes | None = None
+    warnings: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+def convert_bytes(data: bytes, filename: str) -> BytesConversionResult:
+    """Convert raw .msg bytes to .eml bytes, entirely in memory.
+
+    Never raises, for the same reason :func:`convert_file` doesn't: a
+    malformed upload must become a "failed" result, not a crash.
+    """
+    warnings: list[str] = []
+    try:
+        email_msg = _open_and_build(data, warnings)
+        if email_msg is None:
+            return BytesConversionResult(filename, "skipped", warnings=warnings)
+        return BytesConversionResult(
+            filename, "converted", eml_bytes=email_msg.as_bytes(), warnings=warnings
+        )
+    except Exception as exc:
+        logger.debug("Failed to convert %s", filename, exc_info=True)
+        return BytesConversionResult(filename, "failed", warnings=warnings, error=str(exc))
