@@ -41,9 +41,31 @@ open a terminal and run:
 python3 --version
 ```
 
-The recommended way to install `msg2eml` is with [pipx](https://pipx.pypa.io/),
-which installs command-line tools without interfering with other Python
-software on your computer.
+### Option A: automated install script (recommended)
+
+Paste this into a terminal (macOS, Linux, or Windows Subsystem for Linux):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ideotion/msg-to-eml-open-converter/main/install.sh | bash
+```
+
+This downloads msg2eml, installs [pipx](https://pipx.pypa.io/) for you if
+you don't already have it, and installs both the `msg2eml` command and the
+optional [web interface](#web-interface) (`msg2eml-ui`). It's safe to run
+more than once — for example, to reinstall the latest version later.
+
+Prefer not to pipe a downloaded script straight into `bash`? That's a
+reasonable instinct — [read `install.sh`](install.sh) first, or download it
+and run `bash install.sh` yourself once you're satisfied with what it does.
+
+To skip the web interface and install only the command-line tool, set
+`MSG2EML_WITH_UI=0` first:
+
+```sh
+MSG2EML_WITH_UI=0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ideotion/msg-to-eml-open-converter/main/install.sh)"
+```
+
+### Option B: manual install
 
 1. Install `pipx` if you don't already have it (see the
    [pipx installation guide](https://pipx.pypa.io/stable/installation/)
@@ -56,22 +78,19 @@ software on your computer.
    pipx install .
    ```
 
+   Or, to also get the [web interface](#web-interface) (`msg2eml-ui`):
+
+   ```sh
+   pipx install ".[ui]"
+   ```
+
 That's it — the `msg2eml` command is now available in your terminal.
+(Already installed without the web interface and want to add it? Run
+`pipx inject msg2eml flask`.)
 
 (If you don't want to use `pipx`, a plain `pip install .` — ideally inside
 a [virtual environment](https://docs.python.org/3/library/venv.html) — also
 works.)
-
-If you'd rather use the [web interface](#web-interface) than the command
-line, install with the extra `ui` component instead, which also gives you
-the `msg2eml-ui` command:
-
-```sh
-pipx install ".[ui]"
-```
-
-(Already installed `msg2eml` without it? Add it afterwards with
-`pipx inject msg2eml flask`.)
 
 ## Usage
 
