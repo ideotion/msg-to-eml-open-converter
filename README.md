@@ -62,6 +62,17 @@ That's it — the `msg2eml` command is now available in your terminal.
 a [virtual environment](https://docs.python.org/3/library/venv.html) — also
 works.)
 
+If you'd rather use the [web interface](#web-interface) than the command
+line, install with the extra `ui` component instead, which also gives you
+the `msg2eml-ui` command:
+
+```sh
+pipx install ".[ui]"
+```
+
+(Already installed `msg2eml` without it? Add it afterwards with
+`pipx inject msg2eml flask`.)
+
 ## Usage
 
 ### Convert a single file
@@ -112,6 +123,35 @@ msg2eml ./my-outlook-export -r --json-report report.json
 `report.json` will contain one entry per `.msg` file found, recording
 whether it was converted, skipped, or failed, along with any warnings and
 the resulting output path.
+
+## Web interface
+
+If you'd rather not use a terminal, `msg2eml` also has a small, minimalist
+web interface that runs entirely on your own computer — nothing is ever
+uploaded anywhere, it's just a convenient local page for drag-and-drop
+conversion. It requires the `ui` extra (see [Installation](#installation)).
+
+```sh
+msg2eml-ui
+```
+
+This opens a browser tab automatically. Drag one or more `.msg` files onto
+the page (or click it to browse for files), press **Convert**, then click
+**Download** next to each converted file (or **Download all**). It supports
+individual and multiple files; converting a whole folder recursively is
+currently a command-line-only feature (see above).
+
+Options:
+
+| Option | What it does |
+| --- | --- |
+| `--port PORT` | Which local port to listen on (default: `5151`). |
+| `--no-browser` | Don't automatically open a browser tab. |
+
+Only the CLI (`msg2eml`) is installed by default; if you see a message
+about a missing dependency when running `msg2eml-ui`, install the extra
+with `pip install "msg2eml[ui]"` (or `pipx inject msg2eml flask` if you
+installed with pipx).
 
 ## Options
 
@@ -188,24 +228,33 @@ body (some very old or third-party tools that create `.msg` files don't
 set this up correctly). The image should still be present as a regular
 attachment.
 
+**The web UI says the port is already in use** — Something else (perhaps
+another `msg2eml-ui`) is already using port 5151. Either stop that, or run
+`msg2eml-ui --port 5152` (or any other free port).
+
 ## For developers
 
 This project uses [`extract-msg`](https://github.com/TeamMsgExtractor/msg-extractor)
 to parse the `.msg` (OLE2 compound file) format, [`RTFDE`](https://github.com/seamustuohy/RTFDE)
 and `compressed-rtf` to de-encapsulate Rich Text Format bodies into HTML,
-and the Python standard library's `email` package to build the resulting
-`.eml` files.
+the Python standard library's `email` package to build the resulting
+`.eml` files, and (optionally, for the web interface) Flask.
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"   # includes the 'ui' extra, so webui tests run too
 
 ruff check .        # lint
 ruff format .        # auto-format
 mypy                  # type-check
 pytest                # run the test suite
 ```
+
+The web UI's conversion logic lives entirely in `msg2eml.convert` (the same
+module the CLI uses, via `convert_bytes`); `msg2eml/webui/` is only a thin
+Flask presentation layer over it (`app.py`, plus `templates/index.html` and
+`static/` for the page itself).
 
 Real `.msg` sample files can be placed in `tests/fixtures/real/` for local
 integration testing; that folder is gitignored on purpose (email samples

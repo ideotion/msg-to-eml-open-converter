@@ -7,7 +7,7 @@ import pytest
 
 import msg2eml.convert as convert_module
 from msg2eml.cli import main
-from tests.helpers import FakeMsg
+from tests.helpers import OLE2_MAGIC, FakeMsg
 
 
 def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: FakeMsg | Exception) -> None:
@@ -20,8 +20,15 @@ def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: FakeMsg | Exception) ->
 
 
 def _touch(path: Path) -> None:
+    """Write a placeholder file with a valid OLE2 signature.
+
+    Content doesn't otherwise matter here since extract_msg.openMsg is
+    monkeypatched in every test that uses this -- but convert._open_and_build
+    sniffs the OLE2 magic before ever calling it, so the placeholder must
+    have one to reach the mock at all.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"")
+    path.write_bytes(OLE2_MAGIC)
 
 
 def test_main_converts_single_file_and_returns_zero(

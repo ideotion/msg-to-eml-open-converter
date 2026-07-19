@@ -34,9 +34,14 @@ Issues = "https://github.com/ideotion/msg-to-eml-open-converter/issues"
 
 [project.scripts]
 msg2eml = "msg2eml.cli:main"
+msg2eml-ui = "msg2eml.webui:main"
 
 [project.optional-dependencies]
+ui = [
+    "flask>=3.0,<4",
+]
 dev = [
+    "msg2eml[ui]",
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.10",

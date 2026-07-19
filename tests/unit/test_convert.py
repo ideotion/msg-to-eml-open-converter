@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
+from pathlib import Path
 
 import pytest
 
-from msg2eml.convert import build_eml
+from msg2eml.convert import build_eml, convert_file
 from msg2eml.exceptions import ConversionError
-from tests.helpers import FakeAttachment, FakeMsg, FakeRecipient
+from tests.helpers import OLE2_MAGIC, FakeAttachment, FakeMsg, FakeRecipient
 
 UTC_DATE = datetime(2024, 5, 1, 10, 30, tzinfo=timezone.utc)
 
@@ -286,3 +287,35 @@ def test_recipients_fallback_to_raw_strings_when_no_recipient_table() -> None:
     eml = build_eml(msg)
     parsed = _roundtrip(eml)
     assert "fallback@example.com" in str(parsed["To"])
+
+
+def test_convert_file_rejects_non_ole2_file_cleanly(tmp_path: Path) -> None:
+    """A file that isn't even an OLE2 compound file must fail with a clear
+    message rather than whatever extract_msg happens to raise for it --
+    regression test for a raw, confusing FileNotFoundError extract_msg can
+    raise for short/garbage input it mistakes for a file path."""
+    bad_file = tmp_path / "not-really-a-msg.msg"
+    bad_file.write_bytes(b"just some text, not an OLE2 file")
+
+    result = convert_file(bad_file, tmp_path / "out.eml")
+
+    assert result.status == "failed"
+    assert "OLE2" in (result.error or "")
+    assert not (tmp_path / "out.eml").exists()
+
+
+def test_convert_file_accepts_valid_ole2_prefixed_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import msg2eml.convert as convert_module
+
+    monkeypatch.setattr(convert_module.extract_msg, "openMsg", lambda _path: FakeMsg())
+
+    msg_file = tmp_path / "message.msg"
+    msg_file.write_bytes(OLE2_MAGIC + b"rest of the fake ole2 file")
+    output_file = tmp_path / "message.eml"
+
+    result = convert_file(msg_file, output_file)
+
+    assert result.status == "converted"
+    assert output_file.exists()

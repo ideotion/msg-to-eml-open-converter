@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>msg2eml</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="card">
+    <header class="header">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11Z" stroke="currentColor" stroke-width="1.6"/>
+          <path d="m4 7 8 6 8-6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1>msg2eml</h1>
+      </div>
+      <p class="tagline">Convert Outlook <code>.msg</code> files to standard <code>.eml</code> &mdash; entirely on this computer. Nothing is uploaded anywhere.</p>
+    </header>
+
+    <section id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Choose or drop .msg files">
+      <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 15V4m0 0 4 4m-4-4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p class="dropzone-text"><strong>Drop .msg files here</strong> or click to browse</p>
+      <input id="file-input" type="file" accept=".msg" multiple hidden>
+    </section>
+
+    <ul id="file-list" class="file-list" hidden></ul>
+
+    <div class="actions">
+      <button id="convert-button" class="button button-primary" disabled>Convert</button>
+      <button id="download-all-button" class="button button-secondary" hidden>Download all</button>
+      <button id="clear-button" class="button button-ghost" hidden>Clear</button>
+    </div>
+
+    <p id="empty-state" class="empty-state">No files selected yet.</p>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

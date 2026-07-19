@@ -253,6 +253,28 @@ def build_eml(msg: Any, *, warnings: list[str] | None = None, _depth: int = 0) -
     return email_msg
 
 
+_OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _looks_like_ole2(source: str | bytes) -> bool:
+    """Sniff the OLE2 Compound File Binary Format signature every .msg file has.
+
+    Checked upfront so obviously-invalid input gets one clean, consistent
+    error message instead of whatever ``extract_msg.openMsg`` happens to
+    raise for it -- notably, handed a short byte string that could plausibly
+    be a path, it tries to open it as a file and raises a raw
+    ``FileNotFoundError`` quoting the bytes back verbatim, which is a
+    confusing message for something that was never meant to be a path.
+    """
+    if isinstance(source, bytes):
+        return source.startswith(_OLE2_MAGIC)
+    try:
+        with open(source, "rb") as fh:
+            return fh.read(len(_OLE2_MAGIC)) == _OLE2_MAGIC
+    except OSError:
+        return False
+
+
 def _open_and_build(source: str | bytes, warnings: list[str]) -> EmailMessage | None:
     """Open a .msg source, apply message-class gating, and build its EmailMessage.
 
@@ -267,6 +289,9 @@ def _open_and_build(source: str | bytes, warnings: list[str]) -> EmailMessage | 
     the caller, which is expected to catch them broadly -- a genuinely
     unreadable/corrupt file must never raise all the way to a batch loop.
     """
+    if not _looks_like_ole2(source):
+        raise ConversionError("This is not a valid .msg file (not an OLE2 compound file)")
+
     try:
         opened = extract_msg.openMsg(source)
     except ExMsgBaseException as exc:

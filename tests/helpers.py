@@ -11,6 +11,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+#: The OLE2 Compound File Binary Format signature every real .msg file
+#: starts with. msg2eml.convert._open_and_build sniffs this before ever
+#: calling extract_msg.openMsg, so any test that exercises that path --
+#: even with extract_msg.openMsg itself monkeypatched away -- needs its
+#: placeholder file/bytes to start with this, or it never reaches the mock.
+OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
 
 @dataclass
 class FakeRecipient:
