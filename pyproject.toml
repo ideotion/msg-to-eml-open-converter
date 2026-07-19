@@ -26,6 +26,8 @@ dependencies = [
     "extract-msg>=0.54,<0.56",
     "RTFDE>=0.1.0,<0.2",
     "compressed-rtf>=1.0.6,<2",
+    "icalendar>=6.0,<8",
+    "vobject>=0.9.7,<1",
 ]
 
 [project.urls]
@@ -88,7 +90,15 @@ no_implicit_optional = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["extract_msg", "extract_msg.*", "RTFDE", "RTFDE.*", "compressed_rtf", "compressed_rtf.*"]
+module = [
+    "extract_msg",
+    "extract_msg.*",
+    "RTFDE",
+    "RTFDE.*",
+    "compressed_rtf",
+    "compressed_rtf.*",
+    "vobject",
+]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
