@@ -41,14 +41,86 @@ fi
 info "Found Python $PY_VERSION"
 
 # --- 2. pipx --------------------------------------------------------------
+#
+# Bootstrapping pipx has to work across very different Python setups: a
+# normal python.org/Homebrew install (pip always available), a minimal
+# Debian/Ubuntu system (python3's pip module often isn't installed at all),
+# and a Debian/Ubuntu system new enough to refuse any pip install outside a
+# virtualenv (PEP 668) even once pip exists. Each of those needs a different
+# fix, so this tries progressively more invasive options, stopping at the
+# first that works.
 
 NEEDS_NEW_SHELL=0
-if ! command -v pipx >/dev/null 2>&1; then
-  info "pipx not found; installing it for your user account..."
-  python3 -m pip install --user --quiet --upgrade pipx
+
+pip_install_pipx() {
+  # --break-system-packages only matters (and is only reached) on the
+  # PEP-668 "externally managed" Python builds that reject the plain form;
+  # it's scoped to this one `pip install --user pipx` call.
+  python3 -m pip install --user --quiet --upgrade pipx 2>/dev/null \
+    || python3 -m pip install --user --quiet --upgrade --break-system-packages pipx
+}
+
+after_pipx_installed_by_pip() {
   python3 -m pipx ensurepath >/dev/null
   export PATH="$HOME/.local/bin:$PATH"
   NEEDS_NEW_SHELL=1
+}
+
+install_pipx() {
+  command -v pipx >/dev/null 2>&1 && return 0
+  info "pipx not found; installing it..."
+
+  if python3 -m pip --version >/dev/null 2>&1; then
+    if pip_install_pipx; then
+      after_pipx_installed_by_pip
+      return 0
+    fi
+  else
+    info "python3's pip module isn't installed; trying to bootstrap it with ensurepip..."
+    if python3 -m ensurepip --upgrade >/dev/null 2>&1 && pip_install_pipx; then
+      after_pipx_installed_by_pip
+      return 0
+    fi
+  fi
+
+  # Last resort: the OS's own package manager (the officially recommended
+  # route on Debian/Ubuntu in particular). Needs sudo if not already root.
+  local sudo_cmd=""
+  if [ "$(id -u)" != "0" ]; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo_cmd="sudo"
+    else
+      return 1
+    fi
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    info "Installing pipx via apt (this may ask for your password)..."
+    $sudo_cmd apt-get update -qq || true
+    $sudo_cmd apt-get install -y pipx || true
+  elif command -v dnf >/dev/null 2>&1; then
+    info "Installing pipx via dnf (this may ask for your password)..."
+    $sudo_cmd dnf install -y pipx || true
+  elif command -v brew >/dev/null 2>&1; then
+    info "Installing pipx via Homebrew..."
+    brew install pipx || true
+  fi
+
+  if command -v pipx >/dev/null 2>&1; then
+    # The OS package puts pipx itself on PATH, but apps it installs still go
+    # to ~/.local/bin, which may not be -- same fix as the pip-install path.
+    pipx ensurepath >/dev/null 2>&1 || true
+    export PATH="$HOME/.local/bin:$PATH"
+    NEEDS_NEW_SHELL=1
+    return 0
+  fi
+  return 1
+}
+
+if ! install_pipx; then
+  error "Could not install pipx automatically."
+  echo "Please install it manually -- see https://pipx.pypa.io/stable/installation/ -- then re-run this script." >&2
+  exit 1
 fi
 
 if ! command -v pipx >/dev/null 2>&1; then
