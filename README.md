@@ -226,7 +226,11 @@ absolute path of a file you dropped or selected, so that's the only way
   it, only more subfolders), lists everything it finds grouped by which
   folder it's in, and lets you review the list before converting it all
   with one click. Tick **Overwrite already-converted files** first if
-  you're intentionally re-converting something.
+  you're intentionally re-converting something. There's no limit on how
+  many files this can handle in one go — folders of any size are converted
+  the same way the command line handles them, in the background, with a
+  simple progress bar (once there are more than a handful of files) showing
+  how many have been converted out of the total so far.
 
 Options:
 

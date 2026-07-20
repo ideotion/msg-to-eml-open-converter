@@ -33,14 +33,11 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request
-from werkzeug.exceptions import RequestEntityTooLarge
 
 from msg2eml.convert import convert_file
 from msg2eml.walker import discover_msg_files
 
 logger = logging.getLogger(__name__)
-
-MAX_CONTENT_LENGTH = 1 * 1024 * 1024  # requests are just paths, never file content
 
 
 def _resolve_existing_dir(raw_path: str | None) -> tuple[Path | None, tuple[Response, int] | None]:
@@ -62,7 +59,12 @@ def _resolve_existing_dir(raw_path: str | None) -> tuple[Path | None, tuple[Resp
 def create_app() -> Flask:
     """Build the Flask application. Kept separate from :func:`run` for testing."""
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
+    # Deliberately no MAX_CONTENT_LENGTH: this is a local, single-user tool with
+    # no real resource boundary to defend (the server only ever talks to itself
+    # on 127.0.0.1), and /api/convert's body is just a JSON array of path
+    # strings -- never file content -- so its size scales with folder size, not
+    # with anything meaningful to cap. The CLI has no equivalent limit either;
+    # the web UI should be able to handle a folder of any size the same way.
 
     @app.get("/")
     def index() -> str:
@@ -141,10 +143,6 @@ def create_app() -> Flask:
                 }
             )
         return jsonify({"results": results})
-
-    @app.errorhandler(RequestEntityTooLarge)
-    def _too_large(_exc: RequestEntityTooLarge) -> tuple[Response, int]:
-        return jsonify({"error": "That request is too large."}), 413
 
     return app
 

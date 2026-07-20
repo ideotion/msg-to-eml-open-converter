@@ -12,10 +12,15 @@ const resultsList = document.getElementById("results-list");
 const forceCheckbox = document.getElementById("force-checkbox");
 const convertButton = document.getElementById("convert-button");
 const closeResultsButton = document.getElementById("close-results-button");
+const progressContainer = document.getElementById("progress-container");
+const progressFill = document.getElementById("progress-fill");
+const progressLabel = document.getElementById("progress-label");
 
 let currentPath = null;
 let currentParent = null;
 let scanFiles = []; // [{path, name, relativeFolder}]
+let resultsRowsByPath = new Map(); // path -> <li> row in #results-list, rebuilt on each scan
+let conversionInProgress = false;
 
 async function apiGet(url) {
   const response = await fetch(url);
@@ -70,6 +75,41 @@ function joinPath(dir, name) {
   return dir.endsWith("/") ? dir + name : `${dir}/${name}`;
 }
 
+// A folder scan can turn up many thousands of files. There's no request-size
+// cap to work around here (this is a local, single-user tool -- the server
+// has no real resource boundary to defend), but sending everything as one
+// request would still leave the whole run blocked on one long synchronous
+// call with no progress feedback, and one network hiccup would cost the
+// entire run instead of a handful of files. Chunking keeps each request's
+// processing time bounded and means a batch that fails to reach the server
+// only costs that batch.
+//
+// The batch size scales with the total instead of being a fixed constant:
+// a small fixed batch (e.g. always 10) gives great progress granularity on
+// a modest folder but makes a huge one dramatically slower overall, since
+// Flask's dev server has real fixed overhead per request that dominates
+// once there are hundreds of them. Aiming for a roughly constant NUMBER of
+// batches instead keeps that overhead bounded regardless of scale, while
+// the floor (matching PROGRESS_BAR_THRESHOLD) still guarantees at least one
+// real intermediate step for the smallest folder the bar shows up for.
+const TARGET_BATCH_COUNT = 100;
+
+// Below this many files, the whole run is quick enough that a progress bar
+// would just flash by; the button's own "Converting…" state is enough.
+const PROGRESS_BAR_THRESHOLD = 10;
+
+function convertBatchSize(total) {
+  return Math.max(PROGRESS_BAR_THRESHOLD, Math.ceil(total / TARGET_BATCH_COUNT));
+}
+
+function chunk(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function makeNameSpan(icon, name) {
   const span = document.createElement("span");
   span.className = "entry-name";
@@ -112,13 +152,18 @@ function renderBreadcrumbs(path) {
 }
 
 function renderEntries(folders, msgFiles) {
-  entryList.innerHTML = "";
-
   if (folders.length === 0 && msgFiles.length === 0) {
+    entryList.replaceChildren();
     showMessage("This folder is empty.", false);
     return;
   }
   showMessage("", false);
+
+  // Built off-DOM in a fragment and attached once: appending thousands of
+  // rows one at a time directly to a live, connected list forces a layout
+  // recalculation on every single append, which is what actually makes a
+  // large folder feel like it's hung -- not the number of rows itself.
+  const fragment = document.createDocumentFragment();
 
   for (const name of folders) {
     const row = document.createElement("li");
@@ -129,7 +174,7 @@ function renderEntries(folders, msgFiles) {
     button.appendChild(makeNameSpan("📁", name));
     button.addEventListener("click", () => browseTo(joinPath(currentPath, name)));
     row.appendChild(button);
-    entryList.appendChild(row);
+    fragment.appendChild(row);
   }
 
   for (const name of msgFiles) {
@@ -151,14 +196,17 @@ function renderEntries(folders, msgFiles) {
     convertOneButton.addEventListener("click", () => convertSingle(fullPath, row));
     row.appendChild(convertOneButton);
 
-    entryList.appendChild(row);
+    fragment.appendChild(row);
   }
+
+  entryList.replaceChildren(fragment);
 }
 
 function hideResults() {
   resultsSection.hidden = true;
   scanFiles = [];
-  resultsList.innerHTML = "";
+  resultsRowsByPath = new Map();
+  resultsList.replaceChildren();
 }
 
 async function browseTo(path) {
@@ -176,29 +224,34 @@ async function browseTo(path) {
   }
 }
 
-function applyConvertResults(results, container) {
-  const byPath = new Map(results.map((r) => [r.path, r]));
-  for (const row of container.querySelectorAll("[data-path]")) {
-    const result = byPath.get(row.dataset.path);
-    if (!result) continue;
+function applyResultToRow(result, row) {
+  setBadgeStatus(row.querySelector(".badge"), result.status);
 
-    setBadgeStatus(row.querySelector(".badge"), result.status);
+  let detail = row.querySelector(".file-detail, .entry-detail");
+  if (!detail) {
+    detail = document.createElement("span");
+    detail.className = row.classList.contains("file-row") ? "file-detail" : "entry-detail";
+    row.appendChild(detail);
+  }
+  if (result.status === "converted" && result.outputPath) {
+    detail.textContent = `→ ${basename(result.outputPath)}`;
+  } else if (result.error) {
+    detail.textContent = result.error;
+  } else if (result.warnings && result.warnings.length) {
+    detail.textContent = result.warnings.join(" — ");
+  } else {
+    detail.textContent = "";
+  }
+}
 
-    let detail = row.querySelector(".file-detail, .entry-detail");
-    if (!detail) {
-      detail = document.createElement("span");
-      detail.className = container === resultsList ? "file-detail" : "entry-detail";
-      row.appendChild(detail);
-    }
-    if (result.status === "converted" && result.outputPath) {
-      detail.textContent = `→ ${basename(result.outputPath)}`;
-    } else if (result.error) {
-      detail.textContent = result.error;
-    } else if (result.warnings && result.warnings.length) {
-      detail.textContent = result.warnings.join(" — ");
-    } else {
-      detail.textContent = "";
-    }
+// Looks up each result's row via a path -> row Map built once when the list
+// was rendered, rather than re-scanning the whole (potentially huge) results
+// list on every batch: applying N batches against a list of M rows this way
+// is O(N+M) total instead of O(N*M).
+function applyResultsByPath(results, rowsByPath) {
+  for (const result of results) {
+    const row = rowsByPath.get(result.path);
+    if (row) applyResultToRow(result, row);
   }
 }
 
@@ -209,7 +262,7 @@ async function convertSingle(path, row) {
   setBadgeStatus(status, "converting");
   try {
     const data = await apiPost("/api/convert", { paths: [path], force: false });
-    applyConvertResults(data.results, row.parentElement);
+    applyResultToRow(data.results[0], row);
   } catch (err) {
     setBadgeStatus(status, "failed");
   } finally {
@@ -225,7 +278,13 @@ function showResults() {
   }
   showMessage("", false);
   resultsTitle.textContent = `Found ${scanFiles.length} .msg file${scanFiles.length === 1 ? "" : "s"}`;
-  resultsList.innerHTML = "";
+
+  // Built off-DOM in a fragment and attached once (see renderEntries() for
+  // why), while also indexing every row by path so applyResultsByPath() never
+  // has to re-scan the whole list to find the handful of rows one batch of
+  // results actually touches.
+  const fragment = document.createDocumentFragment();
+  resultsRowsByPath = new Map();
 
   let lastFolder = null;
   for (const file of scanFiles) {
@@ -233,7 +292,7 @@ function showResults() {
       const header = document.createElement("li");
       header.className = "group-header";
       header.textContent = file.relativeFolder === "" ? "(this folder)" : file.relativeFolder;
-      resultsList.appendChild(header);
+      fragment.appendChild(header);
       lastFolder = file.relativeFolder;
     }
 
@@ -251,16 +310,52 @@ function showResults() {
     badge.textContent = statusLabel("pending");
     row.appendChild(badge);
 
-    resultsList.appendChild(row);
+    fragment.appendChild(row);
+    resultsRowsByPath.set(file.path, row);
   }
+  resultsList.replaceChildren(fragment);
 
   resultsSection.hidden = false;
   convertButton.disabled = false;
   convertButton.textContent = `Convert ${scanFiles.length} file${scanFiles.length === 1 ? "" : "s"}`;
 }
 
+// A bulk conversion can run for a while (thousands of files, many sequential
+// batches). Every other way to change what's on screen -- scanning again,
+// navigating a folder, closing the results panel -- rebuilds or discards the
+// exact DOM/state the running loop is still reading and writing, which both
+// corrupts that state (results get stamped onto a since-replaced list) and,
+// worse, re-enables the Convert button mid-run (showResults() unconditionally
+// clears it), letting a second overlapping run start. Locking down every
+// navigation control for the duration is the simplest way to make "one run
+// at a time" actually true instead of just assumed.
+function setBusy(busy) {
+  convertButton.disabled = busy;
+  forceCheckbox.disabled = busy;
+  scanButton.disabled = busy;
+  closeResultsButton.disabled = busy;
+  upButton.disabled = busy || !currentParent;
+  for (const el of document.querySelectorAll("#breadcrumbs button, #entry-list button")) {
+    el.disabled = busy;
+  }
+}
+
+// Deliberately simple: every file counts as one equal unit of progress
+// (no weighting by file size, no time-based estimate) -- done/total is the
+// whole formula.
+function showProgress(done, total) {
+  progressContainer.hidden = false;
+  progressFill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
+  progressLabel.textContent = `${done} / ${total} converted`;
+}
+
+function hideProgress() {
+  progressContainer.hidden = true;
+  progressFill.style.width = "0%";
+}
+
 scanButton.addEventListener("click", async () => {
-  if (!currentPath) return;
+  if (!currentPath || conversionInProgress) return;
   scanButton.disabled = true;
   try {
     const data = await apiPost("/api/scan", { path: currentPath });
@@ -274,21 +369,59 @@ scanButton.addEventListener("click", async () => {
 });
 
 convertButton.addEventListener("click", async () => {
-  if (scanFiles.length === 0) return;
-  convertButton.disabled = true;
-  for (const row of resultsList.querySelectorAll(".file-row")) {
-    setBadgeStatus(row.querySelector(".badge"), "converting");
-  }
+  if (scanFiles.length === 0 || conversionInProgress) return;
+  conversionInProgress = true;
+  setBusy(true);
+
   try {
-    const data = await apiPost("/api/convert", {
-      paths: scanFiles.map((f) => f.path),
-      force: forceCheckbox.checked,
-    });
-    applyConvertResults(data.results, resultsList);
-  } catch (err) {
-    showMessage(err.message || "Conversion failed.", true);
+    for (const row of resultsRowsByPath.values()) {
+      setBadgeStatus(row.querySelector(".badge"), "converting");
+    }
+
+    const force = forceCheckbox.checked;
+    const batches = chunk(scanFiles, convertBatchSize(scanFiles.length));
+    const showBar = scanFiles.length > PROGRESS_BAR_THRESHOLD;
+    let done = 0;
+    let failedBatches = 0;
+
+    if (showBar) {
+      convertButton.textContent = "Converting…";
+      showProgress(done, scanFiles.length);
+    }
+
+    for (const batch of batches) {
+      if (!showBar) convertButton.textContent = `Converting ${done}/${scanFiles.length}…`;
+      try {
+        const data = await apiPost("/api/convert", {
+          paths: batch.map((f) => f.path),
+          force,
+        });
+        applyResultsByPath(data.results, resultsRowsByPath);
+      } catch (err) {
+        failedBatches += 1;
+        // This batch's request itself didn't complete (not an individual
+        // file failing) -- mark its rows as failed rather than leaving them
+        // stuck on "Converting…" forever, and keep going with the rest.
+        for (const file of batch) {
+          const row = resultsRowsByPath.get(file.path);
+          if (row) setBadgeStatus(row.querySelector(".badge"), "failed");
+        }
+      }
+      done += batch.length;
+      if (showBar) showProgress(done, scanFiles.length);
+    }
+
+    if (failedBatches > 0) {
+      showMessage(
+        `${failedBatches} of ${batches.length} batch${batches.length === 1 ? "" : "es"} did not complete and ${failedBatches === 1 ? "was" : "were"} marked failed; the rest completed normally.`,
+        true
+      );
+    }
   } finally {
-    convertButton.disabled = false;
+    conversionInProgress = false;
+    setBusy(false);
+    hideProgress();
+    convertButton.textContent = `Convert ${scanFiles.length} file${scanFiles.length === 1 ? "" : "s"}`;
   }
 });
 
