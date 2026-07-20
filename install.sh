@@ -7,9 +7,12 @@
 #   curl -fsSL https://raw.githubusercontent.com/ideotion/msg-to-eml-open-converter/main/install.sh | bash
 #
 # Options (set as environment variables before running):
-#   MSG2EML_WITH_UI=0   Skip installing the optional web interface (Flask).
-#   MSG2EML_BRANCH=main Install from a different branch/tag.
-#   MSG2EML_SRC_DIR=... Where to download the source (default: ~/.local/share/msg2eml-src).
+#   MSG2EML_WITH_UI=0      Skip installing the optional web interface (Flask).
+#   MSG2EML_BRANCH=main    Install from a different branch/tag.
+#   MSG2EML_SRC_DIR=...    Where to download the source (default: ~/.local/share/msg2eml-src).
+#   MSG2EML_AUTO_LAUNCH=0  Don't launch/open the web UI after installing.
+#   MSG2EML_UI_PORT=5151   Port to use when auto-launching the web UI.
+#   MSG2EML_SHORTCUTS=0    Don't create "Start msg2eml" / "Uninstall msg2eml" desktop shortcuts.
 #
 # Safe to re-run: it always reinstalls cleanly rather than leaving stale state.
 
@@ -19,6 +22,9 @@ REPO="ideotion/msg-to-eml-open-converter"
 BRANCH="${MSG2EML_BRANCH:-main}"
 WITH_UI="${MSG2EML_WITH_UI:-1}"
 SRC_DIR="${MSG2EML_SRC_DIR:-$HOME/.local/share/msg2eml-src}"
+AUTO_LAUNCH="${MSG2EML_AUTO_LAUNCH:-1}"
+PORT="${MSG2EML_UI_PORT:-5151}"
+SHORTCUTS="${MSG2EML_SHORTCUTS:-1}"
 
 info()  { printf '\033[1;34m==>\033[0m %s\n' "$1"; }
 error() { printf '\033[1;31mError:\033[0m %s\n' "$1" >&2; }
@@ -192,6 +198,143 @@ if [ "$WITH_UI" = "1" ]; then
 else
   info "Installing msg2eml..."
   install_with_pipx "$SRC_DIR"
+fi
+
+# --- 5. Desktop / Application shortcuts -------------------------------------
+#
+# Only makes sense when the web UI was actually installed -- there's no GUI
+# to shortcut otherwise. Hardcodes the pipx bin dir's absolute path into
+# Exec= / the launcher scripts rather than relying on PATH, because both
+# XDG desktop launchers and double-clicked macOS .app bundles run with a
+# minimal environment that doesn't include the interactive shell's PATH
+# additions.
+
+UI_BIN="${PIPX_BIN_DIR:-$HOME/.local/bin}/msg2eml-ui"
+UNINSTALL_SH="$SRC_DIR/uninstall.sh"
+
+create_linux_shortcuts() {
+  local apps_dir="$HOME/.local/share/applications"
+  mkdir -p "$apps_dir"
+
+  cat >"$apps_dir/msg2eml.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Start msg2eml
+Comment=Convert Outlook .msg files to .eml/.ics/.vcf
+Exec=$UI_BIN
+Terminal=false
+Icon=mail-message-new
+Categories=Utility;Office;
+EOF
+
+  cat >"$apps_dir/msg2eml-uninstall.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Uninstall msg2eml
+Comment=Remove msg2eml and the shortcuts it created
+Exec=bash -lc "'$UNINSTALL_SH'"
+Terminal=true
+Icon=edit-delete
+Categories=Utility;Office;
+EOF
+
+  update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
+}
+
+create_macos_shortcuts() {
+  local apps_dir="$HOME/Applications"
+  mkdir -p "$apps_dir"
+
+  rm -rf "$apps_dir/msg2eml.app"
+  mkdir -p "$apps_dir/msg2eml.app/Contents/MacOS"
+  cat >"$apps_dir/msg2eml.app/Contents/MacOS/msg2eml" <<EOF
+#!/bin/bash
+exec "$UI_BIN"
+EOF
+  chmod +x "$apps_dir/msg2eml.app/Contents/MacOS/msg2eml"
+  cat >"$apps_dir/msg2eml.app/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>msg2eml</string>
+  <key>CFBundleExecutable</key>
+  <string>msg2eml</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.ideotion.msg2eml</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0</string>
+</dict>
+</plist>
+EOF
+
+  rm -rf "$apps_dir/msg2eml-uninstall.app"
+  mkdir -p "$apps_dir/msg2eml-uninstall.app/Contents/MacOS"
+  cat >"$apps_dir/msg2eml-uninstall.app/Contents/MacOS/msg2eml-uninstall" <<EOF
+#!/bin/bash
+osascript -e 'tell application "Terminal" to do script "$UNINSTALL_SH"'
+EOF
+  chmod +x "$apps_dir/msg2eml-uninstall.app/Contents/MacOS/msg2eml-uninstall"
+  cat >"$apps_dir/msg2eml-uninstall.app/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>msg2eml-uninstall</string>
+  <key>CFBundleExecutable</key>
+  <string>msg2eml-uninstall</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.ideotion.msg2eml.uninstall</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0</string>
+</dict>
+</plist>
+EOF
+}
+
+if [ "$WITH_UI" = "1" ] && [ "$SHORTCUTS" != "0" ]; then
+  if [ "$(uname -s)" = "Linux" ]; then
+    info "Creating desktop shortcuts..."
+    create_linux_shortcuts || true
+  elif [ "$(uname -s)" = "Darwin" ]; then
+    info "Creating Application shortcuts in ~/Applications..."
+    create_macos_shortcuts || true
+  fi
+fi
+
+# --- 6. Launch the web UI ----------------------------------------------------
+
+UI_URL="http://127.0.0.1:${PORT}/"
+UI_LOG_FILE="$HOME/.local/share/msg2eml-ui.log"
+
+open_browser_tab() {
+  local url="$1"
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 &
+  elif command -v open >/dev/null 2>&1; then
+    open "$url" >/dev/null 2>&1 &
+  else
+    python3 -c "import webbrowser,sys; webbrowser.open(sys.argv[1])" "$url" >/dev/null 2>&1 &
+  fi
+}
+
+if [ "$WITH_UI" = "1" ] && [ "$AUTO_LAUNCH" != "0" ]; then
+  if command -v curl >/dev/null 2>&1 && curl -fsS -o /dev/null --max-time 1 "$UI_URL" 2>/dev/null; then
+    info "msg2eml web UI is already running -- opening $UI_URL in your browser..."
+    open_browser_tab "$UI_URL" || true
+  else
+    info "Launching the msg2eml web UI in the background..."
+    mkdir -p "$(dirname "$UI_LOG_FILE")"
+    nohup msg2eml-ui --port "$PORT" >"$UI_LOG_FILE" 2>&1 &
+    disown
+    info "msg2eml web UI running at $UI_URL (log: $UI_LOG_FILE)"
+  fi
 fi
 
 echo
