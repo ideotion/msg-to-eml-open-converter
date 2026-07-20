@@ -16,27 +16,34 @@
         </svg>
         <h1>msg2eml</h1>
       </div>
-      <p class="tagline">Convert Outlook <code>.msg</code> files to standard <code>.eml</code>, <code>.ics</code>, or <code>.vcf</code> &mdash; entirely on this computer. Nothing is uploaded anywhere.</p>
+      <p class="tagline">Convert Outlook <code>.msg</code> files to <code>.eml</code>, <code>.ics</code>, or <code>.vcf</code> &mdash; entirely on this computer. Each result is written right next to its source file; nothing is uploaded or downloaded.</p>
     </header>
 
-    <section id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Choose or drop .msg files">
-      <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 15V4m0 0 4 4m-4-4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <p class="dropzone-text"><strong>Drop .msg files here</strong> or click to browse</p>
-      <input id="file-input" type="file" accept=".msg" multiple hidden>
+    <nav id="breadcrumbs" class="breadcrumbs" aria-label="Current folder"></nav>
+
+    <section class="browser">
+      <div class="browser-toolbar">
+        <button id="up-button" class="button button-ghost" type="button" title="Go up one folder">&uarr; Up</button>
+        <button id="scan-button" class="button button-primary" type="button">Scan this folder for .msg files</button>
+      </div>
+      <ul id="entry-list" class="entry-list"></ul>
+      <p id="browser-message" class="browser-message" hidden></p>
     </section>
 
-    <ul id="file-list" class="file-list" hidden></ul>
-
-    <div class="actions">
-      <button id="convert-button" class="button button-primary" disabled>Convert</button>
-      <button id="download-all-button" class="button button-secondary" hidden>Download all</button>
-      <button id="clear-button" class="button button-ghost" hidden>Clear</button>
-    </div>
-
-    <p id="empty-state" class="empty-state">No files selected yet.</p>
+    <section id="results-section" class="results" hidden>
+      <div class="results-header">
+        <h2 id="results-title">Found files</h2>
+        <label class="force-toggle">
+          <input type="checkbox" id="force-checkbox">
+          Overwrite already-converted files
+        </label>
+      </div>
+      <ul id="results-list" class="file-list"></ul>
+      <div class="actions">
+        <button id="convert-button" class="button button-primary" type="button">Convert</button>
+        <button id="close-results-button" class="button button-ghost" type="button">Close</button>
+      </div>
+    </section>
   </main>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>

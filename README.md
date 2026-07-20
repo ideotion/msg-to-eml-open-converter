@@ -70,16 +70,47 @@ you don't already have it, and installs both the `msg2eml` command and the
 optional [web interface](#web-interface) (`msg2eml-ui`). It's safe to run
 more than once — for example, to reinstall the latest version later.
 
+Once installed, it also (all of this only on Linux and macOS):
+
+- **Launches the web interface automatically** in a browser tab, running
+  quietly in the background from then on (or, if one's already running,
+  just opens a tab to it instead of starting a second one).
+- **Adds "Start msg2eml" and "Uninstall msg2eml" shortcuts** — to your
+  applications menu on Linux (also visible in the Windows Start Menu under
+  WSLg), or to `~/Applications` on macOS.
+
 Prefer not to pipe a downloaded script straight into `bash`? That's a
 reasonable instinct — [read `install.sh`](install.sh) first, or download it
 and run `bash install.sh` yourself once you're satisfied with what it does.
 
-To skip the web interface and install only the command-line tool, set
-`MSG2EML_WITH_UI=0` first:
+All of the above can be tuned with environment variables set before running
+the script:
+
+| Variable | Default | Effect when set to `0` |
+| --- | --- | --- |
+| `MSG2EML_WITH_UI` | `1` | Skip the web interface entirely (CLI only). |
+| `MSG2EML_AUTO_LAUNCH` | `1` | Don't launch/open the web UI after installing. |
+| `MSG2EML_SHORTCUTS` | `1` | Don't create the desktop/Application shortcuts. |
+| `MSG2EML_UI_PORT` | `5151` | *(not a toggle)* Port to auto-launch the web UI on. |
+
+For example, to install just the command-line tool with none of the GUI
+extras:
 
 ```sh
 MSG2EML_WITH_UI=0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ideotion/msg-to-eml-open-converter/main/install.sh)"
 ```
+
+### Uninstalling
+
+Click the **"Uninstall msg2eml"** shortcut install.sh created, or run the
+uninstaller it downloaded alongside msg2eml directly:
+
+```sh
+bash ~/.local/share/msg2eml-src/uninstall.sh
+```
+
+It asks for confirmation, then removes the `msg2eml`/`msg2eml-ui` commands,
+the shortcuts, and the downloaded source checkout.
 
 ### Option B: manual install
 
@@ -169,19 +200,33 @@ the resulting output path.
 ## Web interface
 
 If you'd rather not use a terminal, `msg2eml` also has a small, minimalist
-web interface that runs entirely on your own computer — nothing is ever
-uploaded anywhere, it's just a convenient local page for drag-and-drop
-conversion. It requires the `ui` extra (see [Installation](#installation)).
+web interface that runs entirely on your own computer. It requires the
+`ui` extra (see [Installation](#installation)) and is launched
+automatically by `install.sh`; to start it yourself later:
 
 ```sh
 msg2eml-ui
 ```
 
-This opens a browser tab automatically. Drag one or more `.msg` files onto
-the page (or click it to browse for files), press **Convert**, then click
-**Download** next to each converted file (or **Download all**). It supports
-individual and multiple files; converting a whole folder recursively is
-currently a command-line-only feature (see above).
+This opens a browser tab automatically. Unlike a typical web app, there's
+no upload or download step at all: the page shows a simple folder browser
+for navigating your own computer's files, and every conversion is written
+right next to its source file, exactly like the command line does — a
+browser can never tell a web page (or the local server behind it) the real
+absolute path of a file you dropped or selected, so that's the only way
+"write the result next to the original" can actually work here.
+
+- **Browse** into a folder using the breadcrumbs and the folder list.
+- **Convert a single file** directly from the list with its own
+  **Convert** button — handy when a folder has just one or two `.msg`
+  files sitting in it directly.
+- **Convert a whole folder tree at once** with **Scan this folder for
+  `.msg` files** — this looks recursively through every subfolder (even
+  when the folder you're looking at has no `.msg` files directly inside
+  it, only more subfolders), lists everything it finds grouped by which
+  folder it's in, and lets you review the list before converting it all
+  with one click. Tick **Overwrite already-converted files** first if
+  you're intentionally re-converting something.
 
 Options:
 
@@ -290,39 +335,23 @@ another `msg2eml-ui`) is already using port 5151. Either stop that, or run
 
 ## For developers
 
-This project uses [`extract-msg`](https://github.com/TeamMsgExtractor/msg-extractor)
-to parse the `.msg` (OLE2 compound file) format, [`RTFDE`](https://github.com/seamustuohy/RTFDE)
-and `compressed-rtf` to de-encapsulate Rich Text Format bodies into HTML,
-the Python standard library's `email` package to build `.eml` output,
-[`icalendar`](https://icalendar.readthedocs.io/) to build `.ics` output
-(both calendar `VEVENT`s and task `VTODO`s), [`vobject`](https://github.com/py-vobject/vobject)
-to build `.vcf` (vCard) output, and (optionally, for the web interface)
-Flask.
-
-`msg2eml.convert` classifies each parsed `.msg` object by
-`msg2eml.msgclass.MessageKind` and dispatches it to the matching builder:
-`build_eml` (in `convert.py` itself) for email, `msg2eml.calendar_convert`
-for calendar items, `msg2eml.contact_convert` for contacts, and
-`msg2eml.task_convert` for tasks. Every builder is written entirely against
-duck-typed "parsed message" objects (only `getattr`, never `isinstance`
-checks against `extract_msg` classes), so each has its own fast unit tests
-using simple fakes from `tests/helpers.py` rather than real `.msg` files.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how the codebase
+fits together (the message-kind dispatch pipeline, the four format
+builders, the hardening layers, the web UI's local-filesystem design, and
+the duck-typed testing approach) and [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for setting up a dev environment, running the checks, and a walkthrough of
+adding support for another Outlook item type. In short:
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"   # includes the 'ui' extra, so webui tests run too
 
-ruff check .        # lint
-ruff format .        # auto-format
-mypy                  # type-check
-pytest                # run the test suite
+ruff check .           # lint
+ruff format .          # auto-format
+mypy                   # type-check
+pytest                 # run the test suite
 ```
-
-The web UI's conversion logic lives entirely in `msg2eml.convert` (the same
-module the CLI uses, via `convert_bytes`); `msg2eml/webui/` is only a thin
-Flask presentation layer over it (`app.py`, plus `templates/index.html` and
-`static/` for the page itself).
 
 Real `.msg` sample files can be placed in `tests/fixtures/real/` for local
 integration testing; that folder is gitignored on purpose (email samples

@@ -353,7 +353,7 @@ def _build_for_msg(msg: Any, warnings: list[str], depth: int) -> BuildOutput | N
 _OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
-def _looks_like_ole2(source: str | bytes) -> bool:
+def _looks_like_ole2(source: str) -> bool:
     """Sniff the OLE2 Compound File Binary Format signature every .msg file has.
 
     Checked upfront so obviously-invalid input gets one clean, consistent
@@ -363,8 +363,6 @@ def _looks_like_ole2(source: str | bytes) -> bool:
     ``FileNotFoundError`` quoting the bytes back verbatim, which is a
     confusing message for something that was never meant to be a path.
     """
-    if isinstance(source, bytes):
-        return source.startswith(_OLE2_MAGIC)
     try:
         with open(source, "rb") as fh:
             return fh.read(len(_OLE2_MAGIC)) == _OLE2_MAGIC
@@ -372,14 +370,8 @@ def _looks_like_ole2(source: str | bytes) -> bool:
         return False
 
 
-def _open_and_build(source: str | bytes, warnings: list[str]) -> BuildOutput | None:
-    """Open a .msg source and dispatch it to the builder matching its message kind.
-
-    ``source`` is anything ``extract_msg.openMsg`` accepts -- a file path
-    string or raw bytes -- which lets this same helper back both on-disk
-    (:func:`convert_file`) and in-memory (:func:`convert_bytes`) conversion,
-    so every caller shares one code path for message-kind dispatch and the
-    header/body/attachment hardening in :func:`build_eml`.
+def _open_and_build(source: str, warnings: list[str]) -> BuildOutput | None:
+    """Open a .msg file path and dispatch it to the builder matching its message kind.
 
     Returns ``None`` if the message class isn't a supported kind (a
     "Skipped: ..." warning is appended in that case). Exceptions propagate to
@@ -440,38 +432,3 @@ def convert_file(input_path: Path, output_path: Path, *, force: bool = False) ->
     except Exception as exc:
         logger.debug("Failed to convert %s", input_path, exc_info=True)
         return ConversionResult(input_path, "failed", warnings=warnings, error=str(exc))
-
-
-@dataclass
-class BytesConversionResult:
-    """Outcome of converting in-memory .msg bytes (used by the local web UI)."""
-
-    filename: str
-    status: Status
-    output_bytes: bytes | None = None
-    output_format: str | None = None
-    warnings: list[str] = field(default_factory=list)
-    error: str | None = None
-
-
-def convert_bytes(data: bytes, filename: str) -> BytesConversionResult:
-    """Convert raw .msg bytes to output bytes, entirely in memory.
-
-    Never raises, for the same reason :func:`convert_file` doesn't: a
-    malformed upload must become a "failed" result, not a crash.
-    """
-    warnings: list[str] = []
-    try:
-        output = _open_and_build(data, warnings)
-        if output is None:
-            return BytesConversionResult(filename, "skipped", warnings=warnings)
-        return BytesConversionResult(
-            filename,
-            "converted",
-            output_bytes=output.content,
-            output_format=output.extension,
-            warnings=warnings,
-        )
-    except Exception as exc:
-        logger.debug("Failed to convert %s", filename, exc_info=True)
-        return BytesConversionResult(filename, "failed", warnings=warnings, error=str(exc))

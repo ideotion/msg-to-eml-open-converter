@@ -1,187 +1,301 @@
 "use strict";
 
-const dropzone = document.getElementById("dropzone");
-const fileInput = document.getElementById("file-input");
-const fileList = document.getElementById("file-list");
-const emptyState = document.getElementById("empty-state");
+const breadcrumbsEl = document.getElementById("breadcrumbs");
+const upButton = document.getElementById("up-button");
+const scanButton = document.getElementById("scan-button");
+const entryList = document.getElementById("entry-list");
+const browserMessage = document.getElementById("browser-message");
+
+const resultsSection = document.getElementById("results-section");
+const resultsTitle = document.getElementById("results-title");
+const resultsList = document.getElementById("results-list");
+const forceCheckbox = document.getElementById("force-checkbox");
 const convertButton = document.getElementById("convert-button");
-const downloadAllButton = document.getElementById("download-all-button");
-const clearButton = document.getElementById("clear-button");
+const closeResultsButton = document.getElementById("close-results-button");
 
-// Each entry: { file: File, status: "pending"|"converting"|"converted"|"skipped"|"failed",
-//               warnings: string[], error: string|null, downloadUrl: string|null, downloadName: string|null }
-let entries = [];
+let currentPath = null;
+let currentParent = null;
+let scanFiles = []; // [{path, name, relativeFolder}]
 
-function addFiles(fileListLike) {
-  const incoming = Array.from(fileListLike).filter((f) =>
-    f.name.toLowerCase().endsWith(".msg")
-  );
-  for (const file of incoming) {
-    entries.push({
-      file,
-      status: "pending",
-      warnings: [],
-      error: null,
-      downloadUrl: null,
-      downloadName: null,
-    });
-  }
-  render();
+async function apiGet(url) {
+  const response = await fetch(url);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Server error (${response.status})`);
+  return body;
 }
 
-function clearAll() {
-  for (const entry of entries) {
-    if (entry.downloadUrl) URL.revokeObjectURL(entry.downloadUrl);
-  }
-  entries = [];
-  fileInput.value = "";
-  render();
+async function apiPost(url, payload) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Server error (${response.status})`);
+  return body;
+}
+
+function showMessage(text, isError) {
+  browserMessage.textContent = text;
+  browserMessage.hidden = !text;
+  browserMessage.classList.toggle("is-error", Boolean(isError));
 }
 
 function statusLabel(status) {
-  return {
-    pending: "Pending",
-    converting: "Converting…",
-    converted: "Converted",
-    skipped: "Skipped",
-    failed: "Failed",
-  }[status];
+  return (
+    { pending: "Pending", converting: "Converting…", converted: "Converted", skipped: "Skipped", failed: "Failed" }[
+      status
+    ] || status
+  );
 }
 
-function render() {
-  const hasEntries = entries.length > 0;
-  emptyState.hidden = hasEntries;
-  fileList.hidden = !hasEntries;
-  fileList.textContent = "";
+function setBadgeStatus(badge, status) {
+  // Swap only the badge-* modifier class, never the full className: entry-list
+  // badges also carry a marker class ("entry-status") that a full className
+  // replacement would silently wipe out, breaking any later lookup of it.
+  for (const cls of Array.from(badge.classList)) {
+    if (cls.startsWith("badge-")) badge.classList.remove(cls);
+  }
+  badge.classList.add(`badge-${status}`);
+  badge.textContent = statusLabel(status);
+  badge.hidden = false;
+}
 
-  let anyConverted = false;
-  let anyPending = false;
+function basename(path) {
+  const parts = path.split("/");
+  return parts[parts.length - 1];
+}
 
-  for (const entry of entries) {
-    if (entry.status === "converted") anyConverted = true;
-    if (entry.status === "pending") anyPending = true;
+function joinPath(dir, name) {
+  return dir.endsWith("/") ? dir + name : `${dir}/${name}`;
+}
+
+function makeNameSpan(icon, name) {
+  const span = document.createElement("span");
+  span.className = "entry-name";
+  const iconSpan = document.createElement("span");
+  iconSpan.className = "entry-icon";
+  iconSpan.setAttribute("aria-hidden", "true");
+  iconSpan.textContent = icon;
+  span.appendChild(iconSpan);
+  span.appendChild(document.createTextNode(` ${name}`));
+  return span;
+}
+
+function renderBreadcrumbs(path) {
+  breadcrumbsEl.innerHTML = "";
+  const segments = path.split("/").filter(Boolean);
+  let accumulated = "";
+
+  const rootCrumb = document.createElement("button");
+  rootCrumb.type = "button";
+  rootCrumb.className = "crumb";
+  rootCrumb.textContent = "/";
+  rootCrumb.addEventListener("click", () => browseTo("/"));
+  breadcrumbsEl.appendChild(rootCrumb);
+
+  for (const segment of segments) {
+    accumulated += `/${segment}`;
+    const sep = document.createElement("span");
+    sep.className = "crumb-sep";
+    sep.textContent = "›";
+    breadcrumbsEl.appendChild(sep);
+
+    const crumb = document.createElement("button");
+    crumb.type = "button";
+    crumb.className = "crumb";
+    crumb.textContent = segment;
+    const target = accumulated;
+    crumb.addEventListener("click", () => browseTo(target));
+    breadcrumbsEl.appendChild(crumb);
+  }
+}
+
+function renderEntries(folders, msgFiles) {
+  entryList.innerHTML = "";
+
+  if (folders.length === 0 && msgFiles.length === 0) {
+    showMessage("This folder is empty.", false);
+    return;
+  }
+  showMessage("", false);
+
+  for (const name of folders) {
+    const row = document.createElement("li");
+    row.className = "entry-row entry-folder";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "entry-name-button";
+    button.appendChild(makeNameSpan("📁", name));
+    button.addEventListener("click", () => browseTo(joinPath(currentPath, name)));
+    row.appendChild(button);
+    entryList.appendChild(row);
+  }
+
+  for (const name of msgFiles) {
+    const fullPath = joinPath(currentPath, name);
+    const row = document.createElement("li");
+    row.className = "entry-row entry-file";
+    row.dataset.path = fullPath;
+    row.appendChild(makeNameSpan("📄", name));
+
+    const status = document.createElement("span");
+    status.className = "badge badge-pending entry-status";
+    status.hidden = true;
+    row.appendChild(status);
+
+    const convertOneButton = document.createElement("button");
+    convertOneButton.type = "button";
+    convertOneButton.className = "button button-secondary entry-convert";
+    convertOneButton.textContent = "Convert";
+    convertOneButton.addEventListener("click", () => convertSingle(fullPath, row));
+    row.appendChild(convertOneButton);
+
+    entryList.appendChild(row);
+  }
+}
+
+function hideResults() {
+  resultsSection.hidden = true;
+  scanFiles = [];
+  resultsList.innerHTML = "";
+}
+
+async function browseTo(path) {
+  const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
+  try {
+    const data = await apiGet(url);
+    currentPath = data.path;
+    currentParent = data.parent;
+    upButton.disabled = !currentParent;
+    renderBreadcrumbs(currentPath);
+    renderEntries(data.folders, data.msgFiles);
+    hideResults();
+  } catch (err) {
+    showMessage(err.message || "Could not open that folder.", true);
+  }
+}
+
+function applyConvertResults(results, container) {
+  const byPath = new Map(results.map((r) => [r.path, r]));
+  for (const row of container.querySelectorAll("[data-path]")) {
+    const result = byPath.get(row.dataset.path);
+    if (!result) continue;
+
+    setBadgeStatus(row.querySelector(".badge"), result.status);
+
+    let detail = row.querySelector(".file-detail, .entry-detail");
+    if (!detail) {
+      detail = document.createElement("span");
+      detail.className = container === resultsList ? "file-detail" : "entry-detail";
+      row.appendChild(detail);
+    }
+    if (result.status === "converted" && result.outputPath) {
+      detail.textContent = `→ ${basename(result.outputPath)}`;
+    } else if (result.error) {
+      detail.textContent = result.error;
+    } else if (result.warnings && result.warnings.length) {
+      detail.textContent = result.warnings.join(" — ");
+    } else {
+      detail.textContent = "";
+    }
+  }
+}
+
+async function convertSingle(path, row) {
+  const button = row.querySelector(".entry-convert");
+  const status = row.querySelector(".entry-status");
+  button.disabled = true;
+  setBadgeStatus(status, "converting");
+  try {
+    const data = await apiPost("/api/convert", { paths: [path], force: false });
+    applyConvertResults(data.results, row.parentElement);
+  } catch (err) {
+    setBadgeStatus(status, "failed");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function showResults() {
+  if (scanFiles.length === 0) {
+    resultsSection.hidden = true;
+    showMessage("No .msg files found in this folder or its subfolders.", false);
+    return;
+  }
+  showMessage("", false);
+  resultsTitle.textContent = `Found ${scanFiles.length} .msg file${scanFiles.length === 1 ? "" : "s"}`;
+  resultsList.innerHTML = "";
+
+  let lastFolder = null;
+  for (const file of scanFiles) {
+    if (file.relativeFolder !== lastFolder) {
+      const header = document.createElement("li");
+      header.className = "group-header";
+      header.textContent = file.relativeFolder === "" ? "(this folder)" : file.relativeFolder;
+      resultsList.appendChild(header);
+      lastFolder = file.relativeFolder;
+    }
 
     const row = document.createElement("li");
     row.className = "file-row";
+    row.dataset.path = file.path;
 
     const name = document.createElement("span");
     name.className = "file-name";
-    name.textContent = entry.file.name;
-    if (entry.warnings.length || entry.error) {
-      const detail = document.createElement("span");
-      detail.className = "file-warning";
-      detail.textContent = entry.error || entry.warnings.join(" — ");
-      name.appendChild(document.createElement("br"));
-      name.appendChild(detail);
-    }
+    name.textContent = file.name;
     row.appendChild(name);
 
     const badge = document.createElement("span");
-    badge.className = `badge badge-${entry.status}`;
-    badge.textContent = statusLabel(entry.status);
+    badge.className = "badge badge-pending";
+    badge.textContent = statusLabel("pending");
     row.appendChild(badge);
 
-    if (entry.status === "converted" && entry.downloadUrl) {
-      const link = document.createElement("a");
-      link.className = "file-download";
-      link.href = entry.downloadUrl;
-      link.download = entry.downloadName;
-      link.textContent = "Download";
-      row.appendChild(link);
-    }
-
-    fileList.appendChild(row);
+    resultsList.appendChild(row);
   }
 
-  convertButton.disabled = !anyPending;
-  downloadAllButton.hidden = !anyConverted;
-  clearButton.hidden = !hasEntries;
+  resultsSection.hidden = false;
+  convertButton.disabled = false;
+  convertButton.textContent = `Convert ${scanFiles.length} file${scanFiles.length === 1 ? "" : "s"}`;
 }
 
-function base64ToBlob(base64, mimeType) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mimeType });
-}
-
-const MIME_TYPES_BY_FORMAT = {
-  eml: "message/rfc822",
-  ics: "text/calendar",
-  vcf: "text/vcard",
-};
-
-async function convertPending() {
-  const pending = entries.filter((e) => e.status === "pending");
-  if (pending.length === 0) return;
-
-  for (const entry of pending) entry.status = "converting";
-  convertButton.disabled = true;
-  render();
-
-  const formData = new FormData();
-  for (const entry of pending) formData.append("files", entry.file);
-
-  let payload;
+scanButton.addEventListener("click", async () => {
+  if (!currentPath) return;
+  scanButton.disabled = true;
   try {
-    const response = await fetch("/convert", { method: "POST", body: formData });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `Server error (${response.status})`);
-    }
-    payload = await response.json();
+    const data = await apiPost("/api/scan", { path: currentPath });
+    scanFiles = data.files;
+    showResults();
   } catch (err) {
-    for (const entry of pending) {
-      entry.status = "failed";
-      entry.error = err instanceof Error ? err.message : "Could not reach the local server.";
-    }
-    render();
-    return;
-  }
-
-  payload.results.forEach((result, i) => {
-    const entry = pending[i];
-    entry.status = result.status;
-    entry.warnings = result.warnings || [];
-    entry.error = result.error;
-    if (result.outputBase64) {
-      const mimeType = MIME_TYPES_BY_FORMAT[result.outputFormat] || "application/octet-stream";
-      entry.downloadUrl = URL.createObjectURL(base64ToBlob(result.outputBase64, mimeType));
-      entry.downloadName = result.outputFilename;
-    }
-  });
-
-  render();
-}
-
-function downloadAll() {
-  const links = fileList.querySelectorAll("a.file-download");
-  links.forEach((link) => link.click());
-}
-
-dropzone.addEventListener("click", () => fileInput.click());
-dropzone.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    fileInput.click();
+    showMessage(err.message || "Could not scan that folder.", true);
+  } finally {
+    scanButton.disabled = false;
   }
 });
-dropzone.addEventListener("dragover", (event) => {
-  event.preventDefault();
-  dropzone.classList.add("dragover");
-});
-dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
-dropzone.addEventListener("drop", (event) => {
-  event.preventDefault();
-  dropzone.classList.remove("dragover");
-  addFiles(event.dataTransfer.files);
+
+convertButton.addEventListener("click", async () => {
+  if (scanFiles.length === 0) return;
+  convertButton.disabled = true;
+  for (const row of resultsList.querySelectorAll(".file-row")) {
+    setBadgeStatus(row.querySelector(".badge"), "converting");
+  }
+  try {
+    const data = await apiPost("/api/convert", {
+      paths: scanFiles.map((f) => f.path),
+      force: forceCheckbox.checked,
+    });
+    applyConvertResults(data.results, resultsList);
+  } catch (err) {
+    showMessage(err.message || "Conversion failed.", true);
+  } finally {
+    convertButton.disabled = false;
+  }
 });
 
-fileInput.addEventListener("change", () => addFiles(fileInput.files));
-convertButton.addEventListener("click", convertPending);
-downloadAllButton.addEventListener("click", downloadAll);
-clearButton.addEventListener("click", clearAll);
+upButton.addEventListener("click", () => {
+  if (currentParent) browseTo(currentParent);
+});
 
-render();
+closeResultsButton.addEventListener("click", hideResults);
+
+browseTo();
