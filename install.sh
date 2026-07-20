@@ -130,6 +130,23 @@ if ! command -v pipx >/dev/null 2>&1; then
 fi
 info "Found pipx"
 
+# Make sure pipx-installed apps end up on PATH. NEEDS_NEW_SHELL may already be
+# set to 1 above if this script just bootstrapped pipx itself -- but pipx can
+# just as easily have been pre-installed (via the OS, a previous manual
+# install, etc.) with its bin dir still missing from PATH, which that earlier
+# codepath never touches. So this check runs unconditionally, regardless of
+# how pipx got here, and is what actually fixes the "command not found" this
+# script would otherwise leave behind.
+PIPX_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$HOME/.local/bin")"
+case ":$PATH:" in
+  *":$PIPX_BIN_DIR:"*) ;;
+  *)
+    pipx ensurepath >/dev/null 2>&1 || true
+    export PATH="$PIPX_BIN_DIR:$PATH"
+    NEEDS_NEW_SHELL=1
+    ;;
+esac
+
 # --- 3. Download the source -------------------------------------------------
 
 if command -v curl >/dev/null 2>&1; then
@@ -178,12 +195,15 @@ else
 fi
 
 echo
-info "Done! Try one of:"
-echo "    msg2eml --help"
-echo "    msg2eml-ui        # opens the web interface in your browser"
-
 if [ "$NEEDS_NEW_SHELL" = "1" ]; then
+  info "Done! One more step: '$PIPX_BIN_DIR' was just added to your PATH,"
+  echo "      but that only takes effect in *new* terminal windows/tabs."
   echo
-  info "Note: pipx was just installed for the first time. If the 'msg2eml' command"
-  echo "      isn't found above, close and reopen your terminal and try again."
+  echo "      Close and reopen your terminal (or run 'exec \$SHELL -l'), then try:"
+  echo "          msg2eml --help"
+  echo "          msg2eml-ui        # opens the web interface in your browser"
+else
+  info "Done! Try one of:"
+  echo "    msg2eml --help"
+  echo "    msg2eml-ui        # opens the web interface in your browser"
 fi
