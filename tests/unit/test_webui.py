@@ -246,15 +246,26 @@ def test_convert_rejects_non_list_paths_payload(client) -> None:
     assert response.status_code == 400
 
 
-def test_request_entity_too_large_returns_clean_413() -> None:
+def test_convert_handles_a_very_large_batch_of_paths_in_one_request(tmp_path: Path) -> None:
+    """Regression test for a real report: converting a folder of ~6000 .msg
+    files in one click used to send a single /api/convert request whose JSON
+    body of absolute paths alone could exceed an artificial request-size cap
+    -- before any file content was ever involved. This app has no such cap at
+    all now (it's local-only and single-user; there's no real resource
+    boundary to protect, so the web UI can handle a folder of any size the
+    same way the CLI always could), so this sends everything in one request
+    -- deliberately bypassing the frontend's own batching -- to prove the
+    backend itself imposes no limit. The paths don't need to exist on disk:
+    convert_file fails fast (and cheaply) on a nonexistent path, so this
+    stays fast despite the large request body."""
     app = create_app()
     app.config["TESTING"] = True
-    app.config["MAX_CONTENT_LENGTH"] = 10  # tiny, to trigger the handler without a huge body
+    paths = [str(tmp_path / f"message_{i:05d}.msg") for i in range(6000)]
 
     with app.test_client() as test_client:
-        response = test_client.post(
-            "/api/convert", json={"paths": ["/tmp/a-path-longer-than-ten-bytes.msg"]}
-        )
+        response = test_client.post("/api/convert", json={"paths": paths})
 
-    assert response.status_code == 413
-    assert "too large" in response.get_json()["error"].lower()
+    assert response.status_code == 200
+    results = response.get_json()["results"]
+    assert len(results) == 6000
+    assert all(r["status"] == "failed" for r in results)  # none of these paths exist on disk
