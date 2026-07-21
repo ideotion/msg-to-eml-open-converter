@@ -33,11 +33,32 @@
     <section id="results-section" class="results" hidden>
       <div class="results-header">
         <h2 id="results-title">Found files</h2>
-        <label class="force-toggle">
-          <input type="checkbox" id="force-checkbox">
-          Overwrite already-converted files
-        </label>
+        <div class="results-options">
+          <label class="force-toggle">
+            <input type="checkbox" id="force-checkbox">
+            Overwrite already-converted files
+          </label>
+        </div>
       </div>
+      
+      <div id="output-settings" class="output-settings" hidden>
+        <div class="output-settings-row">
+          <label for="output-path-input" class="output-label">Destination folder:</label>
+          <div class="output-path-container">
+            <input type="text" id="output-path-input" class="output-path-input" placeholder="Optional: Choose a destination folder" readonly>
+            <button id="browse-output-button" class="button button-secondary" type="button">Browse...</button>
+            <button id="clear-output-button" class="button button-ghost" type="button" title="Clear destination">&times;</button>
+          </div>
+        </div>
+        <div class="output-settings-row">
+          <label class="preserve-toggle">
+            <input type="checkbox" id="preserve-structure-checkbox" checked>
+            Preserve folder structure
+          </label>
+          <span class="preserve-hint">(when destination is set, maintain subfolder hierarchy from source)</span>
+        </div>
+      </div>
+      
       <ul id="results-list" class="file-list"></ul>
       <div id="progress-container" class="progress-container" hidden>
         <div class="progress-track">
@@ -51,6 +72,27 @@
       </div>
     </section>
   </main>
+
+  <!-- Output folder browser modal (hidden by default) -->
+  <div id="output-browser-modal" class="modal" hidden>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Select Destination Folder</h3>
+        <button id="close-output-browser" class="button button-ghost" type="button">&times;</button>
+      </div>
+      <nav id="output-breadcrumbs" class="breadcrumbs" aria-label="Destination folder"></nav>
+      <div class="modal-browser">
+        <div class="browser-toolbar">
+          <button id="output-up-button" class="button button-ghost" type="button" title="Go up one folder">&uarr; Up</button>
+        </div>
+        <ul id="output-entry-list" class="entry-list"></ul>
+      </div>
+      <div class="modal-actions">
+        <button id="select-output-button" class="button button-primary" type="button" disabled>Select Folder</button>
+        <button id="cancel-output-button" class="button button-ghost" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

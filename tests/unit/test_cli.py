@@ -231,3 +231,59 @@ def test_main_batch_survives_symlink_pointing_outside_input_root(
 
     assert exit_code == 1
     assert (tmp_path / "out" / "normal.eml").exists()
+
+
+# New tests for preserve_structure flag
+
+
+def test_main_batch_flat_structure_with_no_preserve_structure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _touch(tmp_path / "top.msg")
+    _touch(tmp_path / "sub" / "deep" / "nested.msg")
+    _stub_open_msg(monkeypatch, FakeMsg())
+
+    exit_code = main([".", "-r", "-o", "out", "--no-preserve-structure"])
+
+    assert exit_code == 0
+    # With flat structure, all files should be directly in out/
+    assert (tmp_path / "out" / "top.eml").exists()
+    assert (tmp_path / "out" / "nested.eml").exists()
+    # Should NOT have subfolder structure
+    assert not (tmp_path / "out" / "sub").exists()
+    assert not (tmp_path / "out" / "sub" / "deep").exists()
+
+
+def test_main_batch_preserve_structure_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _touch(tmp_path / "top.msg")
+    _touch(tmp_path / "sub" / "deep" / "nested.msg")
+    _stub_open_msg(monkeypatch, FakeMsg())
+
+    exit_code = main([".", "-r", "-o", "out", "--preserve-structure"])
+
+    assert exit_code == 0
+    # With preserve structure (explicit), should maintain subfolder hierarchy
+    assert (tmp_path / "out" / "top.eml").exists()
+    assert (tmp_path / "out" / "sub" / "deep" / "nested.eml").exists()
+
+
+def test_main_batch_preserve_structure_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that preserve_structure is the default behavior (backward compatibility)."""
+    monkeypatch.chdir(tmp_path)
+    _touch(tmp_path / "top.msg")
+    _touch(tmp_path / "sub" / "deep" / "nested.msg")
+    _stub_open_msg(monkeypatch, FakeMsg())
+
+    # Without specifying --preserve-structure or --no-preserve-structure
+    exit_code = main([".", "-r", "-o", "out"])
+
+    assert exit_code == 0
+    # Default should be preserve structure
+    assert (tmp_path / "out" / "top.eml").exists()
+    assert (tmp_path / "out" / "sub" / "deep" / "nested.eml").exists()

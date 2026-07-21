@@ -71,3 +71,42 @@ def test_resolve_batch_output_path_mirrors_relative_structure(tmp_path: Path) ->
     out_root = tmp_path / "output"
     result = resolve_batch_output_path(src, input_root=tmp_path, output=out_root)
     assert result == out_root / "sub" / "deep" / "message.eml"
+
+
+# New tests for preserve_structure parameter
+
+
+def test_resolve_batch_output_path_flat_structure(tmp_path: Path) -> None:
+    src = tmp_path / "sub" / "deep" / "message.msg"
+    out_root = tmp_path / "output"
+    result = resolve_batch_output_path(
+        src, input_root=tmp_path, output=out_root, preserve_structure=False
+    )
+    assert result == out_root / "message.eml"
+
+
+def test_resolve_batch_output_path_preserve_structure_default(tmp_path: Path) -> None:
+    # Default should be preserve_structure=True
+    src = tmp_path / "sub" / "deep" / "message.msg"
+    out_root = tmp_path / "output"
+    result = resolve_batch_output_path(src, input_root=tmp_path, output=out_root)
+    assert result == out_root / "sub" / "deep" / "message.eml"
+
+
+def test_resolve_single_output_path_preserve_structure_with_directory(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "message.msg"
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    # For single file, preserve_structure doesn't affect the result much
+    result = resolve_single_output_path(src, output=str(out_dir), preserve_structure=True)
+    assert result == out_dir / "message.eml"
+
+
+def test_resolve_single_output_path_flat_with_directory(tmp_path: Path) -> None:
+    src = tmp_path / "message.msg"
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = resolve_single_output_path(src, output=str(out_dir), preserve_structure=False)
+    assert result == out_dir / "message.eml"

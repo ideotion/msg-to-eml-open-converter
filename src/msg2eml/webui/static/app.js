@@ -16,11 +16,32 @@ const progressContainer = document.getElementById("progress-container");
 const progressFill = document.getElementById("progress-fill");
 const progressLabel = document.getElementById("progress-label");
 
+// Output settings elements
+const outputSettings = document.getElementById("output-settings");
+const outputPathInput = document.getElementById("output-path-input");
+const browseOutputButton = document.getElementById("browse-output-button");
+const clearOutputButton = document.getElementById("clear-output-button");
+const preserveStructureCheckbox = document.getElementById("preserve-structure-checkbox");
+
+// Modal elements
+const outputBrowserModal = document.getElementById("output-browser-modal");
+const outputBreadcrumbs = document.getElementById("output-breadcrumbs");
+const outputUpButton = document.getElementById("output-up-button");
+const outputEntryList = document.getElementById("output-entry-list");
+const closeOutputBrowser = document.getElementById("close-output-browser");
+const selectOutputButton = document.getElementById("select-output-button");
+const cancelOutputButton = document.getElementById("cancel-output-button");
+
 let currentPath = null;
 let currentParent = null;
 let scanFiles = []; // [{path, name, relativeFolder}]
 let resultsRowsByPath = new Map(); // path -> <li> row in #results-list, rebuilt on each scan
 let conversionInProgress = false;
+
+// Output browser state
+let outputCurrentPath = null;
+let outputCurrentParent = null;
+let selectedOutputFolder = null;
 
 async function apiGet(url) {
   const response = await fetch(url);
@@ -48,7 +69,7 @@ function showMessage(text, isError) {
 
 function statusLabel(status) {
   return (
-    { pending: "Pending", converting: "Converting…", converted: "Converted", skipped: "Skipped", failed: "Failed" }[
+    { pending: "Pending", converting: "Converting\u2026", converted: "Converted", skipped: "Skipped", failed: "Failed" }[
       status
     ] || status
   );
@@ -95,7 +116,7 @@ function joinPath(dir, name) {
 const TARGET_BATCH_COUNT = 100;
 
 // Below this many files, the whole run is quick enough that a progress bar
-// would just flash by; the button's own "Converting…" state is enough.
+// would just flash by; the button's own "Converting\u2026" state is enough.
 const PROGRESS_BAR_THRESHOLD = 10;
 
 function convertBatchSize(total) {
@@ -138,7 +159,7 @@ function renderBreadcrumbs(path) {
     accumulated += `/${segment}`;
     const sep = document.createElement("span");
     sep.className = "crumb-sep";
-    sep.textContent = "›";
+    sep.textContent = "\u203a";
     breadcrumbsEl.appendChild(sep);
 
     const crumb = document.createElement("button");
@@ -171,7 +192,7 @@ function renderEntries(folders, msgFiles) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "entry-name-button";
-    button.appendChild(makeNameSpan("📁", name));
+    button.appendChild(makeNameSpan("\ud83d\udcc1", name));
     button.addEventListener("click", () => browseTo(joinPath(currentPath, name)));
     row.appendChild(button);
     fragment.appendChild(row);
@@ -182,7 +203,7 @@ function renderEntries(folders, msgFiles) {
     const row = document.createElement("li");
     row.className = "entry-row entry-file";
     row.dataset.path = fullPath;
-    row.appendChild(makeNameSpan("📄", name));
+    row.appendChild(makeNameSpan("\ud83d\udcc4", name));
 
     const status = document.createElement("span");
     status.className = "badge badge-pending entry-status";
@@ -207,6 +228,7 @@ function hideResults() {
   scanFiles = [];
   resultsRowsByPath = new Map();
   resultsList.replaceChildren();
+  outputSettings.hidden = true;
 }
 
 async function browseTo(path) {
@@ -234,11 +256,11 @@ function applyResultToRow(result, row) {
     row.appendChild(detail);
   }
   if (result.status === "converted" && result.outputPath) {
-    detail.textContent = `→ ${basename(result.outputPath)}`;
+    detail.textContent = `\u2192 ${basename(result.outputPath)}`;
   } else if (result.error) {
     detail.textContent = result.error;
   } else if (result.warnings && result.warnings.length) {
-    detail.textContent = result.warnings.join(" — ");
+    detail.textContent = result.warnings.join(" \u2014 ");
   } else {
     detail.textContent = "";
   }
@@ -318,6 +340,9 @@ function showResults() {
   resultsSection.hidden = false;
   convertButton.disabled = false;
   convertButton.textContent = `Convert ${scanFiles.length} file${scanFiles.length === 1 ? "" : "s"}`;
+  
+  // Show output settings when we have scan results
+  outputSettings.hidden = false;
 }
 
 // A bulk conversion can run for a while (thousands of files, many sequential
@@ -338,6 +363,10 @@ function setBusy(busy) {
   for (const el of document.querySelectorAll("#breadcrumbs button, #entry-list button")) {
     el.disabled = busy;
   }
+  // Also disable output settings controls when busy
+  browseOutputButton.disabled = busy;
+  clearOutputButton.disabled = busy;
+  preserveStructureCheckbox.disabled = busy;
 }
 
 // Deliberately simple: every file counts as one equal unit of progress
@@ -352,6 +381,126 @@ function showProgress(done, total) {
 function hideProgress() {
   progressContainer.hidden = true;
   progressFill.style.width = "0%";
+}
+
+// Output browser functions
+function renderOutputBreadcrumbs(path) {
+  outputBreadcrumbs.innerHTML = "";
+  const segments = path.split("/").filter(Boolean);
+  let accumulated = "";
+
+  const rootCrumb = document.createElement("button");
+  rootCrumb.type = "button";
+  rootCrumb.className = "crumb";
+  rootCrumb.textContent = "/";
+  rootCrumb.addEventListener("click", () => browseOutputTo("/"));
+  outputBreadcrumbs.appendChild(rootCrumb);
+
+  for (const segment of segments) {
+    accumulated += `/${segment}`;
+    const sep = document.createElement("span");
+    sep.className = "crumb-sep";
+    sep.textContent = "\u203a";
+    outputBreadcrumbs.appendChild(sep);
+
+    const crumb = document.createElement("button");
+    crumb.type = "button";
+    crumb.className = "crumb";
+    crumb.textContent = segment;
+    const target = accumulated;
+    crumb.addEventListener("click", () => browseOutputTo(target));
+    outputBreadcrumbs.appendChild(crumb);
+  }
+}
+
+function renderOutputEntries(folders) {
+  // Built off-DOM in a fragment
+  const fragment = document.createDocumentFragment();
+
+  for (const name of folders) {
+    const fullPath = joinPath(outputCurrentPath, name);
+    const row = document.createElement("li");
+    row.className = "output-entry-row";
+    row.dataset.path = fullPath;
+    
+    if (selectedOutputFolder === fullPath) {
+      row.classList.add("selected");
+    }
+    
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "output-entry-name";
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "output-entry-icon";
+    iconSpan.setAttribute("aria-hidden", "true");
+    iconSpan.textContent = "\ud83d\udcc1";
+    nameSpan.appendChild(iconSpan);
+    nameSpan.appendChild(document.createTextNode(` ${name}`));
+    row.appendChild(nameSpan);
+
+    row.addEventListener("click", () => {
+      // Remove selected class from all rows
+      for (const r of outputEntryList.querySelectorAll(".output-entry-row")) {
+        r.classList.remove("selected");
+      }
+      row.classList.add("selected");
+      selectedOutputFolder = fullPath;
+      selectOutputButton.disabled = false;
+    });
+
+    fragment.appendChild(row);
+  }
+
+  outputEntryList.replaceChildren(fragment);
+}
+
+async function browseOutputTo(path) {
+  const url = path ? `/api/browse-output?path=${encodeURIComponent(path)}` : "/api/browse-output";
+  try {
+    const data = await apiGet(url);
+    outputCurrentPath = data.path;
+    outputCurrentParent = data.parent;
+    outputUpButton.disabled = !outputCurrentParent;
+    renderOutputBreadcrumbs(outputCurrentPath);
+    renderOutputEntries(data.folders);
+  } catch (err) {
+    // Show error in output browser
+    const errorEl = document.createElement("p");
+    errorEl.className = "browser-message is-error";
+    errorEl.textContent = err.message || "Could not open that folder.";
+    outputEntryList.replaceChildren(errorEl);
+  }
+}
+
+function showOutputBrowser() {
+  // Initialize output browser state
+  selectedOutputFolder = outputPathInput.value || null;
+  outputCurrentPath = selectedOutputFolder || "/";
+  outputCurrentParent = outputCurrentPath !== "/" ? outputCurrentPath.substring(0, outputCurrentPath.lastIndexOf("/")) : null;
+  
+  // Reset modal state
+  outputBrowserModal.hidden = false;
+  outputUpButton.disabled = !outputCurrentParent;
+  
+  // Load the current path
+  browseOutputTo(outputCurrentPath);
+  
+  // Disable main UI when modal is open
+  document.getElementById("breadcrumbs").style.opacity = "0.5";
+  document.getElementById("entry-list").style.opacity = "0.5";
+}
+
+function hideOutputBrowser() {
+  outputBrowserModal.hidden = true;
+  
+  // Re-enable main UI
+  document.getElementById("breadcrumbs").style.opacity = "";
+  document.getElementById("entry-list").style.opacity = "";
+}
+
+function setOutputPath(path) {
+  outputPathInput.value = path;
+  // Update the scan files with the new output path context
+  // The scan root is the currentPath when scan was initiated
 }
 
 scanButton.addEventListener("click", async () => {
@@ -379,29 +528,34 @@ convertButton.addEventListener("click", async () => {
     }
 
     const force = forceCheckbox.checked;
+    const outputPath = outputPathInput.value;
+    const preserveStructure = preserveStructureCheckbox.checked;
     const batches = chunk(scanFiles, convertBatchSize(scanFiles.length));
     const showBar = scanFiles.length > PROGRESS_BAR_THRESHOLD;
     let done = 0;
     let failedBatches = 0;
 
     if (showBar) {
-      convertButton.textContent = "Converting…";
+      convertButton.textContent = "Converting\u2026";
       showProgress(done, scanFiles.length);
     }
 
     for (const batch of batches) {
-      if (!showBar) convertButton.textContent = `Converting ${done}/${scanFiles.length}…`;
+      if (!showBar) convertButton.textContent = `Converting ${done}/${scanFiles.length}\u2026`;
       try {
         const data = await apiPost("/api/convert", {
           paths: batch.map((f) => f.path),
           force,
+          outputPath,
+          preserveStructure,
+          scanRoot: currentPath, // Pass the scan root for relative path calculation
         });
         applyResultsByPath(data.results, resultsRowsByPath);
       } catch (err) {
         failedBatches += 1;
         // This batch's request itself didn't complete (not an individual
         // file failing) -- mark its rows as failed rather than leaving them
-        // stuck on "Converting…" forever, and keep going with the rest.
+        // stuck on "Converting\u2026" forever, and keep going with the rest.
         for (const file of batch) {
           const row = resultsRowsByPath.get(file.path);
           if (row) setBadgeStatus(row.querySelector(".badge"), "failed");
@@ -430,5 +584,46 @@ upButton.addEventListener("click", () => {
 });
 
 closeResultsButton.addEventListener("click", hideResults);
+
+// Output settings event listeners
+browseOutputButton.addEventListener("click", () => {
+  showOutputBrowser();
+});
+
+clearOutputButton.addEventListener("click", () => {
+  outputPathInput.value = "";
+  selectedOutputFolder = null;
+});
+
+// Output browser event listeners
+closeOutputBrowser.addEventListener("click", hideOutputBrowser);
+cancelOutputButton.addEventListener("click", hideOutputBrowser);
+
+outputUpButton.addEventListener("click", () => {
+  if (outputCurrentParent) browseOutputTo(outputCurrentParent);
+});
+
+selectOutputButton.addEventListener("click", () => {
+  if (selectedOutputFolder) {
+    setOutputPath(selectedOutputFolder);
+  }
+  hideOutputBrowser();
+});
+
+// Close modal when clicking outside
+outputBrowserModal.addEventListener("click", (e) => {
+  if (e.target === outputBrowserModal) {
+    hideOutputBrowser();
+  }
+});
+
+// Handle keyboard in output browser
+outputBrowserModal.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    hideOutputBrowser();
+  } else if (e.key === "Enter" && !selectOutputButton.disabled) {
+    selectOutputButton.click();
+  }
+});
 
 browseTo();

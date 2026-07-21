@@ -55,6 +55,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing output files instead of skipping them",
     )
     parser.add_argument(
+        "--preserve-structure",
+        action="store_true",
+        default=True,
+        help=(
+            "When converting a folder with -o, preserve the source folder structure "
+            "in the output directory (default). Use --no-preserve-structure to flatten."
+        ),
+    )
+    parser.add_argument(
+        "--no-preserve-structure",
+        action="store_false",
+        dest="preserve_structure",
+        help="Flatten all output files directly into the destination folder, ignoring source subfolders",
+    )
+    parser.add_argument(
         "--json-report",
         metavar="PATH",
         help="Write a machine-readable JSON report (one entry per file) to PATH",
@@ -111,14 +126,23 @@ def _run(args: argparse.Namespace) -> list[ConversionResult]:
         results = []
         for msg_file in msg_files:
             resolve_output = functools.partial(
-                resolve_batch_output_path, msg_file, input_root=input_path, output=output_dir
+                resolve_batch_output_path,
+                msg_file,
+                input_root=input_path,
+                output=output_dir,
+                preserve_structure=args.preserve_structure,
             )
             result = _convert_one(msg_file, resolve_output, force=args.force)
             _log_result(result)
             results.append(result)
         return results
 
-    resolve_output = functools.partial(resolve_single_output_path, input_path, output=args.output)
+    resolve_output = functools.partial(
+        resolve_single_output_path,
+        input_path,
+        output=args.output,
+        preserve_structure=args.preserve_structure,
+    )
     result = _convert_one(input_path, resolve_output, force=args.force)
     _log_result(result)
     return [result]
