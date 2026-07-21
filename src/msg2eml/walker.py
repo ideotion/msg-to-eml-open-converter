@@ -78,4 +78,4 @@ def resolve_batch_output_path(
         return (output / relative).with_suffix(".eml")
     else:
         # Flat structure: all files go directly into output directory
-        return (output / input_path.with_suffix(".eml").name)
+        return output / input_path.with_suffix(".eml").name

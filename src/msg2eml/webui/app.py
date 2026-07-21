@@ -26,6 +26,7 @@ CSRF defense for endpoints that read/write the local filesystem.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import webbrowser
@@ -66,10 +67,8 @@ def _resolve_output_dir(raw_path: str | None) -> tuple[Path | None, tuple[Respon
         return None, None
     target = Path(raw_path).expanduser()
     # Try to resolve, but don't require it to exist yet
-    try:
+    with contextlib.suppress(OSError):
         target = target.resolve()
-    except OSError:
-        pass  # Path doesn't exist yet, that's fine
     # Check if it's a directory path (ends with separator or is existing dir)
     raw_str = raw_path
     if target.is_dir() or raw_str.endswith(("/", "\\")):
@@ -179,13 +178,13 @@ def create_app() -> Flask:
                             output_file = (output_dir / relative).with_suffix(".eml")
                         except ValueError:
                             # File is outside scan root, use flat
-                            output_file = (output_dir / input_path.with_suffix(".eml").name)
+                            output_file = output_dir / input_path.with_suffix(".eml").name
                     else:
                         # No scan root provided, use flat structure
-                        output_file = (output_dir / input_path.with_suffix(".eml").name)
+                        output_file = output_dir / input_path.with_suffix(".eml").name
                 else:
                     # Flat structure: all files directly in output directory
-                    output_file = (output_dir / input_path.with_suffix(".eml").name)
+                    output_file = output_dir / input_path.with_suffix(".eml").name
             else:
                 # No output directory specified, write next to source (original behavior)
                 output_file = input_path.with_suffix(".eml")
@@ -221,9 +220,7 @@ def create_app() -> Flask:
             key=str.lower,
         )
         parent = str(target.parent) if target.parent != target else None
-        return jsonify(
-            {"path": str(target), "parent": parent, "folders": folders}
-        )
+        return jsonify({"path": str(target), "parent": parent, "folders": folders})
 
     return app
 

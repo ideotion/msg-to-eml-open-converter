@@ -75,6 +75,7 @@ def test_resolve_batch_output_path_mirrors_relative_structure(tmp_path: Path) ->
 
 # New tests for preserve_structure parameter
 
+
 def test_resolve_batch_output_path_flat_structure(tmp_path: Path) -> None:
     src = tmp_path / "sub" / "deep" / "message.msg"
     out_root = tmp_path / "output"

@@ -235,6 +235,7 @@ def test_main_batch_survives_symlink_pointing_outside_input_root(
 
 # New tests for preserve_structure flag
 
+
 def test_main_batch_flat_structure_with_no_preserve_structure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
