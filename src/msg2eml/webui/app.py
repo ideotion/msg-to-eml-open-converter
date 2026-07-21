@@ -56,6 +56,29 @@ def _resolve_existing_dir(raw_path: str | None) -> tuple[Path | None, tuple[Resp
     return target, None
 
 
+def _resolve_output_dir(raw_path: str | None) -> tuple[Path | None, tuple[Response, int] | None]:
+    """Resolve a user-supplied output path to a directory (can be non-existent).
+
+    Unlike _resolve_existing_dir, this allows non-existent paths since the
+    conversion will create them. Returns None for the path if raw_path is None.
+    """
+    if raw_path is None:
+        return None, None
+    target = Path(raw_path).expanduser()
+    # Try to resolve, but don't require it to exist yet
+    try:
+        target = target.resolve()
+    except OSError:
+        pass  # Path doesn't exist yet, that's fine
+    # Check if it's a directory path (ends with separator or is existing dir)
+    raw_str = raw_path
+    if target.is_dir() or raw_str.endswith(("/", "\\")):
+        return target, None
+    # If it doesn't end with separator and isn't a directory, treat as directory anyway
+    # (the conversion will create it)
+    return target, None
+
+
 def create_app() -> Flask:
     """Build the Flask application. Kept separate from :func:`run` for testing."""
     app = Flask(__name__)
@@ -127,11 +150,47 @@ def create_app() -> Flask:
         if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
             return jsonify({"error": "Expected a non-empty list of file paths"}), 400
         force = bool(payload.get("force", False))
+        output_path = payload.get("outputPath")
+        preserve_structure = payload.get("preserveStructure", True)
+
+        # Resolve output directory if provided
+        output_dir, error = _resolve_output_dir(output_path)
+        if error is not None:
+            return error
 
         results: list[dict[str, Any]] = []
         for raw_path in paths:
             input_path = Path(raw_path)
-            result = convert_file(input_path, input_path.with_suffix(".eml"), force=force)
+            # Determine output path based on whether we have a custom destination
+            if output_dir is not None:
+                # Use the output directory
+                if preserve_structure:
+                    # Calculate relative path from scan root to maintain structure
+                    # The scan root is the parent of the first file's relative path
+                    # For now, we'll use a simple approach: preserve relative to input's parent
+                    # But we need the scan root. Let's use the first file's parent as reference
+                    # Actually, we need to know the scan root. Let's pass it in the payload.
+                    # For backward compatibility, if no scanRoot, just use flat
+                    scan_root = payload.get("scanRoot")
+                    if scan_root:
+                        scan_root_path = Path(scan_root)
+                        try:
+                            relative = input_path.resolve().relative_to(scan_root_path.resolve())
+                            output_file = (output_dir / relative).with_suffix(".eml")
+                        except ValueError:
+                            # File is outside scan root, use flat
+                            output_file = (output_dir / input_path.with_suffix(".eml").name)
+                    else:
+                        # No scan root provided, use flat structure
+                        output_file = (output_dir / input_path.with_suffix(".eml").name)
+                else:
+                    # Flat structure: all files directly in output directory
+                    output_file = (output_dir / input_path.with_suffix(".eml").name)
+            else:
+                # No output directory specified, write next to source (original behavior)
+                output_file = input_path.with_suffix(".eml")
+
+            result = convert_file(input_path, output_file, force=force)
             results.append(
                 {
                     "path": str(input_path),
@@ -143,6 +202,28 @@ def create_app() -> Flask:
                 }
             )
         return jsonify({"results": results})
+
+    @app.get("/api/browse-output")
+    def browse_output() -> Response | tuple[Response, int]:
+        """Browse for output directory selection."""
+        target, error = _resolve_existing_dir(request.args.get("path"))
+        if error is not None:
+            return error
+        assert target is not None
+
+        try:
+            entries = list(target.iterdir())
+        except OSError as exc:
+            return jsonify({"error": f"Could not read folder: {exc}"}), 403
+
+        folders = sorted(
+            (entry.name for entry in entries if entry.is_dir() and not entry.name.startswith(".")),
+            key=str.lower,
+        )
+        parent = str(target.parent) if target.parent != target else None
+        return jsonify(
+            {"path": str(target), "parent": parent, "folders": folders}
+        )
 
     return app
 
