@@ -228,7 +228,6 @@ function hideResults() {
   scanFiles = [];
   resultsRowsByPath = new Map();
   resultsList.replaceChildren();
-  outputSettings.hidden = true;
 }
 
 async function browseTo(path) {
@@ -340,9 +339,6 @@ function showResults() {
   resultsSection.hidden = false;
   convertButton.disabled = false;
   convertButton.textContent = `Convert ${scanFiles.length} file${scanFiles.length === 1 ? "" : "s"}`;
-  
-  // Show output settings when we have scan results
-  outputSettings.hidden = false;
 }
 
 // A bulk conversion can run for a while (thousands of files, many sequential
@@ -422,11 +418,11 @@ function renderOutputEntries(folders) {
     const row = document.createElement("li");
     row.className = "output-entry-row";
     row.dataset.path = fullPath;
-    
+
     if (selectedOutputFolder === fullPath) {
       row.classList.add("selected");
     }
-    
+
     const nameSpan = document.createElement("span");
     nameSpan.className = "output-entry-name";
     const iconSpan = document.createElement("span");
@@ -476,14 +472,14 @@ function showOutputBrowser() {
   selectedOutputFolder = outputPathInput.value || null;
   outputCurrentPath = selectedOutputFolder || "/";
   outputCurrentParent = outputCurrentPath !== "/" ? outputCurrentPath.substring(0, outputCurrentPath.lastIndexOf("/")) : null;
-  
+
   // Reset modal state
   outputBrowserModal.hidden = false;
   outputUpButton.disabled = !outputCurrentParent;
-  
+
   // Load the current path
   browseOutputTo(outputCurrentPath);
-  
+
   // Disable main UI when modal is open
   document.getElementById("breadcrumbs").style.opacity = "0.5";
   document.getElementById("entry-list").style.opacity = "0.5";
@@ -491,7 +487,7 @@ function showOutputBrowser() {
 
 function hideOutputBrowser() {
   outputBrowserModal.hidden = true;
-  
+
   // Re-enable main UI
   document.getElementById("breadcrumbs").style.opacity = "";
   document.getElementById("entry-list").style.opacity = "";
@@ -499,8 +495,6 @@ function hideOutputBrowser() {
 
 function setOutputPath(path) {
   outputPathInput.value = path;
-  // Update the scan files with the new output path context
-  // The scan root is the currentPath when scan was initiated
 }
 
 scanButton.addEventListener("click", async () => {

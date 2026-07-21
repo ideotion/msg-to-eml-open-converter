@@ -26,22 +26,9 @@
         <button id="up-button" class="button button-ghost" type="button" title="Go up one folder">&uarr; Up</button>
         <button id="scan-button" class="button button-primary" type="button">Scan this folder for .msg files</button>
       </div>
-      <ul id="entry-list" class="entry-list"></ul>
-      <p id="browser-message" class="browser-message" hidden></p>
-    </section>
-
-    <section id="results-section" class="results" hidden>
-      <div class="results-header">
-        <h2 id="results-title">Found files</h2>
-        <div class="results-options">
-          <label class="force-toggle">
-            <input type="checkbox" id="force-checkbox">
-            Overwrite already-converted files
-          </label>
-        </div>
-      </div>
       
-      <div id="output-settings" class="output-settings" hidden>
+      <!-- Output settings - always visible -->
+      <div id="output-settings" class="output-settings">
         <div class="output-settings-row">
           <label for="output-path-input" class="output-label">Destination folder:</label>
           <div class="output-path-container">
@@ -56,6 +43,21 @@
             Preserve folder structure
           </label>
           <span class="preserve-hint">(when destination is set, maintain subfolder hierarchy from source)</span>
+        </div>
+      </div>
+      
+      <ul id="entry-list" class="entry-list"></ul>
+      <p id="browser-message" class="browser-message" hidden></p>
+    </section>
+
+    <section id="results-section" class="results" hidden>
+      <div class="results-header">
+        <h2 id="results-title">Found files</h2>
+        <div class="results-options">
+          <label class="force-toggle">
+            <input type="checkbox" id="force-checkbox">
+            Overwrite already-converted files
+          </label>
         </div>
       </div>
       
