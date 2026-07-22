@@ -41,7 +41,6 @@ let conversionInProgress = false;
 // Output browser state
 let outputCurrentPath = null;
 let outputCurrentParent = null;
-let selectedOutputFolder = null;
 
 async function apiGet(url) {
   const response = await fetch(url);
@@ -415,6 +414,11 @@ function renderOutputBreadcrumbs(path) {
   }
 }
 
+// Clicking a folder navigates into it -- the same convention the main file
+// browser already uses (renderEntries() above). "Select Folder" always picks
+// whichever folder is currently being displayed (outputCurrentPath), so
+// choosing a destination is just "browse to it, then confirm", with no
+// separate highlight-a-row-without-entering-it state to reconcile.
 function renderOutputEntries(folders) {
   // Built off-DOM in a fragment
   const fragment = document.createDocumentFragment();
@@ -424,10 +428,6 @@ function renderOutputEntries(folders) {
     const row = document.createElement("li");
     row.className = "output-entry-row";
     row.dataset.path = fullPath;
-
-    if (selectedOutputFolder === fullPath) {
-      row.classList.add("selected");
-    }
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "output-entry-name";
@@ -439,15 +439,7 @@ function renderOutputEntries(folders) {
     nameSpan.appendChild(document.createTextNode(` ${name}`));
     row.appendChild(nameSpan);
 
-    row.addEventListener("click", () => {
-      // Remove selected class from all rows
-      for (const r of outputEntryList.querySelectorAll(".output-entry-row")) {
-        r.classList.remove("selected");
-      }
-      row.classList.add("selected");
-      selectedOutputFolder = fullPath;
-      selectOutputButton.disabled = false;
-    });
+    row.addEventListener("click", () => browseOutputTo(fullPath));
 
     fragment.appendChild(row);
   }
@@ -462,10 +454,13 @@ async function browseOutputTo(path) {
     outputCurrentPath = data.path;
     outputCurrentParent = data.parent;
     outputUpButton.disabled = !outputCurrentParent;
+    selectOutputButton.disabled = false;
     renderOutputBreadcrumbs(outputCurrentPath);
     renderOutputEntries(data.folders);
   } catch (err) {
-    // Show error in output browser
+    // Show error in output browser; outputCurrentPath deliberately keeps its
+    // last successfully-browsed value, so Select Folder still targets that
+    // (rather than whatever failed to load) and Up/breadcrumbs still work.
     const errorEl = document.createElement("p");
     errorEl.className = "browser-message is-error";
     errorEl.textContent = err.message || "Could not open that folder.";
@@ -474,14 +469,14 @@ async function browseOutputTo(path) {
 }
 
 function showOutputBrowser() {
-  // Initialize output browser state
-  selectedOutputFolder = outputPathInput.value || null;
-  outputCurrentPath = selectedOutputFolder || "/";
+  // Start browsing at the previously-chosen destination, or root.
+  outputCurrentPath = outputPathInput.value.trim() || "/";
   outputCurrentParent = outputCurrentPath !== "/" ? outputCurrentPath.substring(0, outputCurrentPath.lastIndexOf("/")) : null;
 
   // Reset modal state
   outputBrowserModal.hidden = false;
   outputUpButton.disabled = !outputCurrentParent;
+  selectOutputButton.disabled = true;
 
   // Load the current path
   browseOutputTo(outputCurrentPath);
@@ -592,7 +587,6 @@ browseOutputButton.addEventListener("click", () => {
 
 clearOutputButton.addEventListener("click", () => {
   outputPathInput.value = "";
-  selectedOutputFolder = null;
 });
 
 // Output browser event listeners
@@ -604,8 +598,8 @@ outputUpButton.addEventListener("click", () => {
 });
 
 selectOutputButton.addEventListener("click", () => {
-  if (selectedOutputFolder) {
-    setOutputPath(selectedOutputFolder);
+  if (outputCurrentPath) {
+    setOutputPath(outputCurrentPath);
   }
   hideOutputBrowser();
 });
