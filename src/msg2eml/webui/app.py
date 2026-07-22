@@ -58,24 +58,48 @@ def _resolve_existing_dir(raw_path: str | None) -> tuple[Path | None, tuple[Resp
 
 
 def _resolve_output_dir(raw_path: str | None) -> tuple[Path | None, tuple[Response, int] | None]:
-    """Resolve a user-supplied output path to a directory (can be non-existent).
+    """Resolve a user-supplied destination-folder path for /api/convert.
 
-    Unlike _resolve_existing_dir, this allows non-existent paths since the
-    conversion will create them. Returns None for the path if raw_path is None.
+    Unlike _resolve_existing_dir, the target doesn't need to exist yet --
+    convert_file() creates parent directories on demand. Returns (None, None)
+    when no destination was chosen: the frontend always sends an outputPath
+    field, using "" for "no destination folder set", and that must behave
+    exactly like omitting the field (i.e. write next to the source), not
+    resolve to the server process's current working directory.
     """
-    if raw_path is None:
+    if raw_path is None or not raw_path.strip():
         return None, None
     target = Path(raw_path).expanduser()
-    # Try to resolve, but don't require it to exist yet
     with contextlib.suppress(OSError):
         target = target.resolve()
-    # Check if it's a directory path (ends with separator or is existing dir)
-    raw_str = raw_path
-    if target.is_dir() or raw_str.endswith(("/", "\\")):
-        return target, None
-    # If it doesn't end with separator and isn't a directory, treat as directory anyway
-    # (the conversion will create it)
+    if target.exists() and not target.is_dir():
+        return None, (jsonify({"error": f"Not a folder: {target}"}), 400)
     return target, None
+
+
+def _resolve_convert_output(
+    input_path: Path,
+    *,
+    output_dir: Path | None,
+    scan_root: str | None,
+    preserve_structure: bool,
+) -> Path:
+    """Compute the placeholder output path for one file being converted.
+
+    With no destination folder, the result sits next to the source (original
+    behavior). With a destination folder and preserve_structure, the file's
+    path relative to scan_root is mirrored into it; if scan_root wasn't given
+    or the file doesn't actually live under it, this falls back to placing
+    just that one file directly in the destination folder rather than failing
+    the whole batch over it.
+    """
+    if output_dir is None:
+        return input_path.with_suffix(".eml")
+    if preserve_structure and scan_root:
+        with contextlib.suppress(ValueError):
+            relative = input_path.resolve().relative_to(Path(scan_root).resolve())
+            return (output_dir / relative).with_suffix(".eml")
+    return output_dir / input_path.with_suffix(".eml").name
 
 
 def create_app() -> Flask:
@@ -149,46 +173,22 @@ def create_app() -> Flask:
         if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
             return jsonify({"error": "Expected a non-empty list of file paths"}), 400
         force = bool(payload.get("force", False))
-        output_path = payload.get("outputPath")
-        preserve_structure = payload.get("preserveStructure", True)
+        preserve_structure = bool(payload.get("preserveStructure", True))
+        scan_root = payload.get("scanRoot")
 
-        # Resolve output directory if provided
-        output_dir, error = _resolve_output_dir(output_path)
+        output_dir, error = _resolve_output_dir(payload.get("outputPath"))
         if error is not None:
             return error
 
         results: list[dict[str, Any]] = []
         for raw_path in paths:
             input_path = Path(raw_path)
-            # Determine output path based on whether we have a custom destination
-            if output_dir is not None:
-                # Use the output directory
-                if preserve_structure:
-                    # Calculate relative path from scan root to maintain structure
-                    # The scan root is the parent of the first file's relative path
-                    # For now, we'll use a simple approach: preserve relative to input's parent
-                    # But we need the scan root. Let's use the first file's parent as reference
-                    # Actually, we need to know the scan root. Let's pass it in the payload.
-                    # For backward compatibility, if no scanRoot, just use flat
-                    scan_root = payload.get("scanRoot")
-                    if scan_root:
-                        scan_root_path = Path(scan_root)
-                        try:
-                            relative = input_path.resolve().relative_to(scan_root_path.resolve())
-                            output_file = (output_dir / relative).with_suffix(".eml")
-                        except ValueError:
-                            # File is outside scan root, use flat
-                            output_file = output_dir / input_path.with_suffix(".eml").name
-                    else:
-                        # No scan root provided, use flat structure
-                        output_file = output_dir / input_path.with_suffix(".eml").name
-                else:
-                    # Flat structure: all files directly in output directory
-                    output_file = output_dir / input_path.with_suffix(".eml").name
-            else:
-                # No output directory specified, write next to source (original behavior)
-                output_file = input_path.with_suffix(".eml")
-
+            output_file = _resolve_convert_output(
+                input_path,
+                output_dir=output_dir,
+                scan_root=scan_root,
+                preserve_structure=preserve_structure,
+            )
             result = convert_file(input_path, output_file, force=force)
             results.append(
                 {
