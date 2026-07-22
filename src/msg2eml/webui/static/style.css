@@ -526,10 +526,20 @@ body {
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.5);
-  display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
+}
+
+/* :not([hidden]) rather than a bare `display: flex` on .modal: an
+   unconditional display value on the element is an author-stylesheet rule,
+   which -- at equal specificity -- always wins over the browser's built-in
+   `[hidden] { display: none }` default. Setting `hidden` on this element
+   would then be silently ignored and the modal would render permanently
+   open regardless of the attribute, since nothing else here overrides
+   `display` back to `none`. */
+.modal:not([hidden]) {
+  display: flex;
 }
 
 .modal-content {

@@ -282,7 +282,13 @@ async function convertSingle(path, row) {
   button.disabled = true;
   setBadgeStatus(status, "converting");
   try {
-    const data = await apiPost("/api/convert", { paths: [path], force: false });
+    const data = await apiPost("/api/convert", {
+      paths: [path],
+      force: false,
+      outputPath: outputPathInput.value,
+      preserveStructure: preserveStructureCheckbox.checked,
+      scanRoot: currentPath,
+    });
     applyResultToRow(data.results[0], row);
   } catch (err) {
     setBadgeStatus(status, "failed");

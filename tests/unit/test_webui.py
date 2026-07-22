@@ -29,6 +29,7 @@ def _stub_open_msg(monkeypatch: pytest.MonkeyPatch, msg: object) -> None:
 
 
 def _write_msg(path: Path, extra: bytes = b"rest of fake msg") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(OLE2_MAGIC + extra)
 
 
@@ -130,6 +131,21 @@ def test_scan_returns_empty_list_when_nothing_found(client, tmp_path: Path) -> N
 def test_scan_returns_404_for_a_missing_path(client, tmp_path: Path) -> None:
     response = client.post("/api/scan", json={"path": str(tmp_path / "nope")})
     assert response.status_code == 404
+
+
+def test_scan_finds_msg_files_at_arbitrary_depth(client, tmp_path: Path) -> None:
+    """Not just one level of subfolders: the scan must keep recursing into
+    subfolders of subfolders of subfolders, however deep the tree goes."""
+    deep_dir = tmp_path / "a" / "b" / "c" / "d" / "e"
+    deep_dir.mkdir(parents=True)
+    _write_msg(deep_dir / "deep.msg")
+
+    response = client.post("/api/scan", json={"path": str(tmp_path)})
+
+    assert response.status_code == 200
+    files = response.get_json()["files"]
+    assert [f["name"] for f in files] == ["deep.msg"]
+    assert files[0]["relativeFolder"] == "a/b/c/d/e"
 
 
 def test_convert_writes_output_next_to_source(
@@ -244,6 +260,141 @@ def test_convert_rejects_missing_paths_payload(client) -> None:
 def test_convert_rejects_non_list_paths_payload(client) -> None:
     response = client.post("/api/convert", json={"paths": "not-a-list"})
     assert response.status_code == 400
+
+
+def test_convert_with_empty_string_output_path_writes_next_to_source(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: the frontend always sends an outputPath field, using
+    "" for "no destination folder chosen" (never omitting the key). That
+    must behave exactly like a request with no outputPath at all -- writing
+    next to the source -- and must NOT resolve "" to the server process's
+    current working directory."""
+    monkeypatch.chdir(tmp_path)  # a decoy cwd distinct from the source's folder
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    msg_path = source_dir / "message.msg"
+    _write_msg(msg_path)
+    _stub_open_msg(monkeypatch, FakeMsg())
+
+    response = client.post(
+        "/api/convert",
+        json={"paths": [str(msg_path)], "outputPath": "", "scanRoot": str(source_dir)},
+    )
+
+    assert response.status_code == 200
+    (result,) = response.get_json()["results"]
+    assert result["status"] == "converted"
+    assert result["outputPath"] == str(source_dir / "message.eml")
+    assert (source_dir / "message.eml").exists()
+    assert not (tmp_path / "message.eml").exists()
+
+
+def test_convert_rejects_output_path_pointing_at_an_existing_file(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_open_msg(monkeypatch, FakeMsg())
+    msg_path = tmp_path / "message.msg"
+    _write_msg(msg_path)
+    not_a_dir = tmp_path / "not-a-dir.txt"
+    not_a_dir.write_text("i am a file, not a folder")
+
+    response = client.post(
+        "/api/convert", json={"paths": [str(msg_path)], "outputPath": str(not_a_dir)}
+    )
+
+    assert response.status_code == 400
+    assert "not a folder" in response.get_json()["error"].lower()
+
+
+def test_convert_with_output_path_and_preserve_structure_mirrors_scan_root(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_open_msg(monkeypatch, FakeMsg())
+    source_dir = tmp_path / "source"
+    nested_msg = source_dir / "sub" / "deep" / "nested.msg"
+    _write_msg(nested_msg)
+    dest_dir = tmp_path / "dest"
+
+    response = client.post(
+        "/api/convert",
+        json={
+            "paths": [str(nested_msg)],
+            "outputPath": str(dest_dir),
+            "preserveStructure": True,
+            "scanRoot": str(source_dir),
+        },
+    )
+
+    assert response.status_code == 200
+    (result,) = response.get_json()["results"]
+    assert result["status"] == "converted"
+    expected = dest_dir / "sub" / "deep" / "nested.eml"
+    assert result["outputPath"] == str(expected)
+    assert expected.exists()
+
+
+def test_convert_with_output_path_and_flat_structure_ignores_source_subfolders(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_open_msg(monkeypatch, FakeMsg())
+    source_dir = tmp_path / "source"
+    nested_msg = source_dir / "sub" / "deep" / "nested.msg"
+    _write_msg(nested_msg)
+    dest_dir = tmp_path / "dest"
+
+    response = client.post(
+        "/api/convert",
+        json={
+            "paths": [str(nested_msg)],
+            "outputPath": str(dest_dir),
+            "preserveStructure": False,
+            "scanRoot": str(source_dir),
+        },
+    )
+
+    assert response.status_code == 200
+    (result,) = response.get_json()["results"]
+    assert result["status"] == "converted"
+    assert result["outputPath"] == str(dest_dir / "nested.eml")
+    assert not (dest_dir / "sub").exists()
+
+
+def test_convert_with_output_path_but_no_scan_root_falls_back_to_flat(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_open_msg(monkeypatch, FakeMsg())
+    msg_path = tmp_path / "source" / "message.msg"
+    _write_msg(msg_path)
+    dest_dir = tmp_path / "dest"
+
+    response = client.post(
+        "/api/convert", json={"paths": [str(msg_path)], "outputPath": str(dest_dir)}
+    )
+
+    assert response.status_code == 200
+    (result,) = response.get_json()["results"]
+    assert result["status"] == "converted"
+    assert result["outputPath"] == str(dest_dir / "message.eml")
+
+
+def test_browse_output_lists_only_subfolders(client, tmp_path: Path) -> None:
+    (tmp_path / "Archive").mkdir()
+    (tmp_path / ".hidden").mkdir()
+    _write_msg(tmp_path / "standalone.msg")
+
+    response = client.get(f"/api/browse-output?path={tmp_path}")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["path"] == str(tmp_path)
+    assert data["folders"] == ["Archive"]
+    assert "msgFiles" not in data
+
+
+def test_browse_output_returns_404_for_a_missing_path(client, tmp_path: Path) -> None:
+    response = client.get(f"/api/browse-output?path={tmp_path / 'does-not-exist'}")
+    assert response.status_code == 404
 
 
 def test_convert_handles_a_very_large_batch_of_paths_in_one_request(tmp_path: Path) -> None:
