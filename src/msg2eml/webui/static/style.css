@@ -303,10 +303,6 @@ body {
   color: var(--text);
 }
 
-.output-path-input:read-only {
-  cursor: pointer;
-}
-
 .preserve-toggle {
   display: flex;
   align-items: center;
@@ -610,15 +606,6 @@ body {
 
 .output-entry-row:hover {
   background: var(--accent-soft);
-}
-
-.output-entry-row.selected {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-
-.output-entry-row.selected .output-entry-name {
-  color: var(--accent-contrast);
 }
 
 .output-entry-name {
